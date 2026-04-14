@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user-specific settings and profile information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "currency": { "type": "string", "default": "LKR" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "isInvited": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "Pre-approved emails that can join the app.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "invitedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "invitedBy"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Represents a single spending transaction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "category", "date"]
+    },
+    "Income": {
+      "title": "Income",
+      "description": "Represents a single earning transaction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "source": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "source", "date"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Custom expense categories with budget limits.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "budget": { "type": "number", "description": "Monthly budget for this category" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "required": ["userId", "name", "budget"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Collection of all expenses"
+    },
+    "/income/{incomeId}": {
+      "schema": "Income",
+      "description": "Collection of all income"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "User-defined categories and budgets"
+    },
+    "/invitations/{email}": {
+      "schema": "Invitation",
+      "description": "Allowed emails for registration"
+    }
+  }
+}
