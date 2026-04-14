@@ -41,7 +41,9 @@ import {
   History,
   LayoutDashboard,
   Search,
-  MoreVertical
+  MoreVertical,
+  Share2,
+  Copy
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -208,6 +210,13 @@ const Dashboard = () => {
     } finally {
       setIsGeneratingInsight(false);
     }
+  };
+
+  const copyInviteLink = (email?: string) => {
+    const url = window.location.origin;
+    const text = email ? `You've been invited to Payground! Login here: ${url}` : url;
+    navigator.clipboard.writeText(text);
+    alert("Link copied to clipboard! Send this to the invited user.");
   };
 
   const deleteInvitation = async (id: string) => {
@@ -380,12 +389,21 @@ const Dashboard = () => {
             <section className="bg-white dark:bg-gray-900 rounded-[48px] p-8">
               <div className="flex justify-between items-center mb-8">
                 <h3 className="text-2xl font-black text-gray-900 dark:text-white">User Invitations</h3>
-                <button 
-                  onClick={() => setIsInviting(true)}
-                  className="bg-purple-600 text-white px-6 py-3 rounded-full font-black text-sm flex items-center gap-2"
-                >
-                  <UserPlus className="w-4 h-4" /> Invite User
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => copyInviteLink()}
+                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400"
+                    title="Copy App URL"
+                  >
+                    <Share2 className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => setIsInviting(true)}
+                    className="bg-purple-600 text-white px-6 py-3 rounded-full font-black text-sm flex items-center gap-2"
+                  >
+                    <UserPlus className="w-4 h-4" /> Invite User
+                  </button>
+                </div>
               </div>
               <div className="space-y-4">
                 {invitations.length > 0 ? invitations.map((invite, i) => (
@@ -401,12 +419,22 @@ const Dashboard = () => {
                         </p>
                       </div>
                     </div>
-                    <button 
-                      onClick={() => invite.id && deleteInvitation(invite.id)}
-                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
-                    >
-                      <AlertCircle className="w-5 h-5" />
-                    </button>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => copyInviteLink(invite.email)}
+                        className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-full"
+                        title="Copy Invite Message"
+                      >
+                        <Copy className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => invite.id && deleteInvitation(invite.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
+                        title="Delete Invitation"
+                      >
+                        <AlertCircle className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
                 )) : (
                   <p className="text-center py-12 text-gray-400 font-medium">No invitations sent yet.</p>
@@ -674,8 +702,12 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               createdAt: serverTimestamp()
             };
             await setDoc(userRef, newProfile);
-            if (inviteSnap.exists()) {
-              await setDoc(inviteRef, { status: 'accepted' }, { merge: true });
+            if (inviteSnap.exists() && inviteSnap.data().status !== 'accepted') {
+              try {
+                await setDoc(inviteRef, { status: 'accepted' }, { merge: true });
+              } catch (e) {
+                console.error("Failed to update invitation status", e);
+              }
             }
             setProfile(newProfile);
           } else {

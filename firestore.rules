@@ -56,7 +56,11 @@ service cloud.firestore {
 
     match /invitations/{email} {
       allow read: if isAuthenticated();
-      allow write, delete: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAuthenticated() && 
+        (isAdmin() || (request.auth.token.email.lower() == email.lower() && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && 
+         request.resource.data.status == 'accepted'));
     }
 
     match /expenses/{expenseId} {
