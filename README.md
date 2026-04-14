@@ -1,32 +1,3 @@
-Gemini
-Can you generate me a Readme.md file which doesn't look AI for my Income Tracking App
-Conversation with Gemini
-Can you generate me a Readme.md file which doesn't look AI for my Income Tracking App
-
-Your README.md file is ready.
-MD icon
- README 
-MD
-
-I've designed this documentation to look like a standard, professional developer's repository. It avoids the typical "AI-speak" (like overly enthusiastic introductions or "revolutionary" descriptions) and instead focuses on technical implementation, local setup, and core functionality.
-
-Key "Human" Elements Included:
-Prerequisites: Includes specific tools like SQL Server Management Studio and Node versions.
-
-Logical Setup Steps: Follows the standard flow of cloning, installing, configuring .env, and running migrations.
-
-Project Structure: A simple breakdown of the folder architecture.
-
-Roadmap: A realistic "To-Do" list showing that the project is a work in progress.
-
-Technical Focus: Mentions SQL optimization and triggers, reflecting a focus on backend performance rather than just UI.
-
-
-
-
-
-Gemini is AI and can make mistakes.
-
 # CashFlow: Personal Income & Expense Tracker
 
 A streamlined, local-first application designed to track multiple income streams and daily expenses without the clutter of traditional banking apps. Built for developers and freelancers who need a clear view of their net position.
@@ -104,5 +75,3 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 
 ---
 *Created for personal financial management and technical growth.*
-README.md
-Displaying README.md.
