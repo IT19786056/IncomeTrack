@@ -191,7 +191,9 @@ const Dashboard = () => {
     if (!user) return;
     setIsGeneratingInsight(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("Gemini API key is missing.");
+      const ai = new GoogleGenAI({ apiKey });
       const model = "gemini-3-flash-preview";
       const expenseSummary = expenses.map(e => `${e.category}: LKR ${e.amount}`).join(', ');
       const incomeSummary = income.map(i => `${i.source}: LKR ${i.amount}`).join(', ');
