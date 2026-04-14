@@ -13,7 +13,7 @@ A streamlined, local-first application designed to track multiple income streams
 ## Tech Stack
 
 * **Backend:** Node.js / Express
-* **Database:** SQL Server (Complex query optimization for reporting)
+* **Database:** Firebase
 * **Frontend:** React with a focus on responsive, mobile-first design
 * **State Management:** Redux Toolkit
 
