@@ -6,6 +6,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, signInWithGoogle, logout, db } from './firebase';
+import { registerSW } from 'virtual:pwa-register';
 import { 
   collection, 
   onSnapshot, 
@@ -59,6 +60,7 @@ import { GoogleGenAI } from "@google/genai";
 import { Expense, Income, Category, OperationType, UserProfile, Invitation } from './types';
 import { handleFirestoreError } from './lib/firestoreUtils';
 
+registerSW({ immediate: true });
 // --- Context ---
 const AuthContext = createContext<{
   user: User | null;
