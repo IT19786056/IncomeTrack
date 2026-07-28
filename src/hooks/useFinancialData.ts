@@ -9,8 +9,6 @@ import type {
   TaxProfile,
   TransactionView,
 } from '../types';
-import { OperationType } from '../types';
-import { handleFirestoreError } from '../lib/firestoreUtils';
 import {
   normalizeExpenses,
   normalizeIncome,
@@ -153,7 +151,9 @@ export function useInvitations(isAdmin: boolean) {
             status: (d.data().status as string) ?? 'pending',
           })),
         ),
-      (e) => handleFirestoreError(e, OperationType.LIST, 'invitations'),
+      // Logged, not thrown: this fires inside an onSnapshot callback, where a
+      // throw escapes React's error boundary and surfaces as an uncaught error.
+      (e) => console.error('Failed to load invitations', e),
     );
   }, [isAdmin]);
 
