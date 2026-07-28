@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Check, Info, RotateCcw, Settings2, TriangleAlert } from 'lucide-react';
 import type { DeadlineStatus, TaxOverview } from '../hooks/useTaxOverview';
 import { money, moneyPrecise, percent, relativeDays, shortDate } from '../lib/format';
@@ -124,8 +125,15 @@ export function TaxScreen({
   onUnsettle,
   onOpenSetup,
 }: Props) {
-  const { current, regime, yearDeadlines, needsSetup } = overview;
-  const saving = deductionSaving(current);
+  const { current, projected, projection, regime, yearDeadlines, needsSetup } =
+    overview;
+
+  // Part-way through a year there are two honest answers — what has actually
+  // been logged, and what the year is heading for. Show both rather than
+  // picking one silently.
+  const [basis, setBasis] = useState<'projected' | 'actual'>('projected');
+  const shown = projection.isProjection && basis === 'projected' ? projected : current;
+  const saving = deductionSaving(shown);
 
   return (
     <div className="space-y-5">
@@ -197,28 +205,93 @@ export function TaxScreen({
           {REGIME_LABELS[regime]}
         </p>
 
-        <Row label="Income received" value={money(current.grossIncome)} />
+        {projection.isProjection && (
+          <>
+            <div
+              role="group"
+              aria-label="Basis for these figures"
+              className="mb-3 grid grid-cols-2 gap-1 rounded-full bg-black/[0.05] p-1 dark:bg-white/10"
+            >
+              {(
+                [
+                  ['projected', 'Estimated year'],
+                  ['actual', 'Logged so far'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setBasis(value)}
+                  aria-pressed={basis === value}
+                  className={`rounded-full py-2 text-xs font-bold transition-colors ${
+                    basis === value
+                      ? 'bg-white shadow-sm dark:bg-ink-800'
+                      : 'text-ink-900/55 dark:text-white/55'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {basis === 'projected' && (
+              <div className="mb-3 rounded-[var(--radius-tile)] bg-brand-50 p-3 text-xs leading-relaxed text-brand-900 dark:bg-brand-900/20 dark:text-brand-100">
+                {projection.basis === 'expected' ? (
+                  <p>
+                    Your {projection.monthsWithIncome}{' '}
+                    {projection.monthsWithIncome === 1 ? 'logged month' : 'logged months'}{' '}
+                    counted as recorded, with the remaining{' '}
+                    {12 - projection.monthsWithIncome} filled at the LKR{' '}
+                    {money(projection.expectedMonthlyIncome ?? 0)} a month you
+                    expect.
+                  </p>
+                ) : (
+                  <p>
+                    Scaled to a full year from the {projection.monthsWithIncome}{' '}
+                    {projection.monthsWithIncome === 1 ? 'month' : 'months'} you have
+                    logged, averaging LKR {money(projection.monthlyAverageIncome)} a
+                    month.{' '}
+                    <button
+                      type="button"
+                      onClick={onOpenSetup}
+                      className="font-semibold underline underline-offset-2"
+                    >
+                      Set an expected monthly income
+                    </button>{' '}
+                    if your rate has changed — averaging cannot see a pay rise.
+                  </p>
+                )}
+                <p className="mt-1.5 opacity-80">
+                  Quarterly instalments are based on this, because
+                  self-assessment charges a quarter of the estimated year.
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        <Row label="Income received" value={money(shown.grossIncome)} />
         <Row
           label="Deductible expenses"
-          value={money(current.deductibleExpenses)}
+          value={money(shown.deductibleExpenses)}
           note="Expenses you flagged as business costs"
-          negative={current.deductibleExpenses > 0}
+          negative={shown.deductibleExpenses > 0}
         />
-        <Row label="Net business income" value={money(current.netBusinessIncome)} emphasis />
+        <Row label="Net business income" value={money(shown.netBusinessIncome)} emphasis />
         <Row
           label="Personal relief"
-          value={money(current.reliefApplied)}
-          note={`Up to LKR ${money(current.personalRelief)} per year`}
-          negative={current.reliefApplied > 0}
+          value={money(shown.reliefApplied)}
+          note={`Up to LKR ${money(shown.personalRelief)} per year`}
+          negative={shown.reliefApplied > 0}
         />
-        <Row label="Taxable income" value={money(current.taxableIncome)} emphasis />
+        <Row label="Taxable income" value={money(shown.taxableIncome)} emphasis />
 
-        {current.bands.length > 0 && (
+        {shown.bands.length > 0 && (
           <div className="mt-4 space-y-2 rounded-[var(--radius-tile)] bg-black/[0.03] p-4 dark:bg-white/5">
             <p className="text-[11px] font-bold tracking-wider text-ink-900/50 uppercase dark:text-white/45">
               Bands applied
             </p>
-            {current.bands.map((band, index) => (
+            {shown.bands.map((band, index) => (
               <div
                 key={index}
                 className="tabular flex items-baseline justify-between gap-3 font-mono text-xs"
@@ -234,14 +307,18 @@ export function TaxScreen({
 
         <div className="mt-4 flex items-baseline justify-between gap-4 border-t-2 border-ink-900/10 pt-4 dark:border-white/15">
           <div>
-            <p className="text-sm font-bold">Tax for the year</p>
+            <p className="text-sm font-bold">
+              {projection.isProjection && basis === 'projected'
+                ? 'Estimated tax for the year'
+                : 'Tax on what you have logged'}
+            </p>
             <p className="tabular mt-0.5 text-xs text-ink-900/50 dark:text-white/45">
-              {percent(current.effectiveRate)} effective · LKR{' '}
-              {money(current.monthlyEquivalent)}/month
+              {percent(shown.effectiveRate)} effective · LKR{' '}
+              {money(shown.monthlyEquivalent)}/month
             </p>
           </div>
           <p className="tabular shrink-0 font-mono text-xl font-bold">
-            {money(current.totalTax)}
+            {money(shown.totalTax)}
           </p>
         </div>
 
@@ -252,11 +329,11 @@ export function TaxScreen({
           </p>
         )}
 
-        {current.nextThreshold && (
+        {shown.nextThreshold && (
           <p className="tabular mt-3 text-xs text-ink-900/55 dark:text-white/50">
-            {current.nextThreshold.taxableAt === 0
-              ? `Tax begins at LKR ${money(current.nextThreshold.grossAt)} of income — another LKR ${money(current.nextThreshold.remaining)} to go.`
-              : `The ${percent(current.nextThreshold.rate)} band starts at LKR ${money(current.nextThreshold.grossAt)} — another LKR ${money(current.nextThreshold.remaining)} to go.`}
+            {shown.nextThreshold.taxableAt === 0
+              ? `Tax begins at LKR ${money(shown.nextThreshold.grossAt)} of income for the year — another LKR ${money(shown.nextThreshold.remaining)} to go.`
+              : `The ${percent(shown.nextThreshold.rate)} band starts at LKR ${money(shown.nextThreshold.grossAt)} — another LKR ${money(shown.nextThreshold.remaining)} to go.`}
           </p>
         )}
       </section>

@@ -139,13 +139,19 @@ export async function deleteCategory(id: string) {
 /** One tax profile per user, keyed by uid so it can never be duplicated. */
 export async function saveTaxProfile(
   userId: string,
-  settings: { regime: TaxRegime; hasTin: boolean; hasFiledBefore: boolean },
+  settings: {
+    regime: TaxRegime;
+    hasTin: boolean;
+    hasFiledBefore: boolean;
+    expectedMonthlyIncome: number | null;
+  },
 ) {
   const profile: TaxProfile = {
     userId,
     regime: settings.regime,
     hasTin: settings.hasTin,
     hasFiledBefore: settings.hasFiledBefore,
+    expectedMonthlyIncome: settings.expectedMonthlyIncome,
     updatedAt: serverTimestamp() as unknown as null,
   };
   try {

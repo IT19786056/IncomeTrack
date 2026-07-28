@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { FormError, SelectField, SubmitButton, ToggleField } from '../ui/Field';
+import {
+  AmountField,
+  FormError,
+  SelectField,
+  SubmitButton,
+  ToggleField,
+} from '../ui/Field';
 import { saveTaxProfile } from '../../lib/repository';
 import type { TaxProfile } from '../../types';
 import type { TaxRegime } from '../../lib/tax';
@@ -29,15 +35,30 @@ export function TaxSetupForm({ userId, existing, onDone }: Props) {
   const [regime, setRegime] = useState<TaxRegime>(existing?.regime ?? 'service-export');
   const [hasTin, setHasTin] = useState(existing?.hasTin ?? false);
   const [hasFiledBefore, setHasFiledBefore] = useState(existing?.hasFiledBefore ?? false);
+  const [expectedMonthly, setExpectedMonthly] = useState(
+    existing?.expectedMonthlyIncome ? String(existing.expectedMonthlyIncome) : '',
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
+
+    const parsedExpected = expectedMonthly.trim() === '' ? null : Number(expectedMonthly);
+    if (parsedExpected !== null && (!Number.isFinite(parsedExpected) || parsedExpected < 0)) {
+      setError('Enter a monthly amount of zero or more, or leave it blank.');
+      return;
+    }
+
     setSaving(true);
     try {
-      await saveTaxProfile(userId, { regime, hasTin, hasFiledBefore });
+      await saveTaxProfile(userId, {
+        regime,
+        hasTin,
+        hasFiledBefore,
+        expectedMonthlyIncome: parsedExpected,
+      });
       onDone();
     } catch {
       setError('Could not save that. Check your connection and try again.');
@@ -74,6 +95,13 @@ export function TaxSetupForm({ userId, existing, onDone }: Props) {
         hint="Helps the app tell you which filings are genuinely outstanding."
         checked={hasFiledBefore}
         onChange={setHasFiledBefore}
+      />
+
+      <AmountField
+        label="Expected income per month"
+        value={expectedMonthly}
+        onChange={setExpectedMonthly}
+        hint="Used to estimate months you haven't logged yet, so a pay rise isn't averaged away. Leave blank to estimate from your logged months instead."
       />
 
       <SubmitButton loading={saving}>Save tax setup</SubmitButton>
