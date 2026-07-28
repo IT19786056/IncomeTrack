@@ -11,7 +11,7 @@ import {
   yaStartYearForDate,
 } from '../lib/tax';
 import type { TaxRegime } from '../lib/tax';
-import { totals, withinYa } from '../lib/transactions';
+import { projectYear, totals, withinYa, type YearProjection } from '../lib/transactions';
 
 /**
  * Assumed until the user confirms their setup. Chosen because it is the
@@ -35,7 +35,12 @@ export interface TaxOverview {
   regime: TaxRegime;
   /** True while the user has not confirmed their tax setup. */
   needsSetup: boolean;
+  /** Tax on the records as they stand — what would be owed if the year ended now. */
   current: TaxComputation;
+  /** Tax on the estimated full year. Equals `current` once the year is closed. */
+  projected: TaxComputation;
+  /** How the full-year estimate was arrived at. */
+  projection: YearProjection;
   /** The next thing actually requiring money or a filing, if any. */
   nextAction: DeadlineStatus | null;
   /** Passed deadlines that carried a liability and are unsettled. */
@@ -65,10 +70,9 @@ export function useTaxOverview(
   const regime = taxProfile?.regime ?? DEFAULT_REGIME;
 
   return useMemo(() => {
-    /** Tax for any year of assessment, computed from that year's records. */
-    const computeFor = (year: number): TaxComputation => {
-      const yearTransactions = withinYa(transactions, year);
-      const { income, deductibleExpenses } = totals(yearTransactions);
+    /** Tax on what has actually been logged for a year of assessment. */
+    const actualFor = (year: number): TaxComputation => {
+      const { income, deductibleExpenses } = totals(withinYa(transactions, year));
       return computeTax({
         yaStartYear: year,
         regime,
@@ -77,19 +81,41 @@ export function useTaxOverview(
       });
     };
 
-    const current = computeFor(yaStartYear);
+    /** Tax on the estimated full year, which is what instalments are based on. */
+    const projectedFor = (year: number) => {
+      const estimate = projectYear(
+        transactions,
+        year,
+        now,
+        taxProfile?.expectedMonthlyIncome,
+      );
+      return {
+        estimate,
+        computation: computeTax({
+          yaStartYear: year,
+          regime,
+          grossIncome: estimate.income,
+          deductibleExpenses: estimate.deductibleExpenses,
+        }),
+      };
+    };
+
+    const current = actualFor(yaStartYear);
+    const { estimate: projection, computation: projected } = projectedFor(yaStartYear);
 
     // Cache per year: several deadlines share a year of assessment.
     const byYear = new Map<number, TaxComputation>();
     const cachedComputation = (year: number) => {
+      if (year === yaStartYear) return projected;
       const existing = byYear.get(year);
       if (existing) return existing;
-      const computed = year === yaStartYear ? current : computeFor(year);
+      const computed = projectedFor(year).computation;
       byYear.set(year, computed);
       return computed;
     };
 
     const describe = (deadline: Deadline): DeadlineStatus => {
+      // Instalments are a quarter of the estimated year, not of tax so far.
       const computation = cachedComputation(deadline.yaStartYear);
       const amountDue =
         deadline.period === 'RETURN'
@@ -121,6 +147,8 @@ export function useTaxOverview(
       regime,
       needsSetup: taxProfile === null,
       current,
+      projected,
+      projection,
       nextAction,
       overdue: describedOverdue,
       upcoming: describedUpcoming,

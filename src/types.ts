@@ -74,6 +74,12 @@ export interface TaxProfile {
   hasTin: boolean;
   /** Whether they have ever filed a return. */
   hasFiledBefore: boolean;
+  /**
+   * What they expect to receive in a normal month. Used to fill months not yet
+   * logged, so a mid-year pay rise isn't averaged away. Null means fall back to
+   * the average of the months on record.
+   */
+  expectedMonthlyIncome?: number | null;
   updatedAt: FirestoreDate;
 }
 

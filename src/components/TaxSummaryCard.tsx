@@ -16,9 +16,13 @@ interface Props {
  * dashboard stays quiet so this reads as the centre of gravity.
  */
 export function TaxSummaryCard({ overview, onOpenDetail }: Props) {
-  const { current, nextAction } = overview;
-  const saving = deductionSaving(current);
-  const owesNothing = current.totalTax <= 0;
+  const { current, projected, projection, nextAction } = overview;
+
+  // Lead with the estimated year: that is what instalments are based on, and
+  // what "how much will I owe" actually means part-way through a year.
+  const headline = projection.isProjection ? projected : current;
+  const saving = deductionSaving(headline);
+  const owesNothing = headline.totalTax <= 0;
 
   const urgency =
     nextAction == null
@@ -48,15 +52,38 @@ export function TaxSummaryCard({ overview, onOpenDetail }: Props) {
 
         <div className="mt-4">
           <p className="text-xs font-medium text-white/50">
-            {owesNothing ? 'Nothing owed so far' : 'Owed for this year'}
+            {projection.isProjection
+              ? 'Estimated for the full year'
+              : owesNothing
+                ? 'Nothing owed'
+                : 'Owed for this year'}
           </p>
           <p className="tabular mt-1 flex items-baseline gap-1.5 font-mono text-4xl font-bold tracking-tight sm:text-5xl">
             <span className="text-lg font-semibold text-white/50 sm:text-xl">LKR</span>
-            {money(current.totalTax)}
+            {money(headline.totalTax)}
           </p>
-          {!owesNothing && (
+
+          {projection.isProjection ? (
             <p className="tabular mt-1.5 text-xs text-white/45">
-              {percent(current.effectiveRate)} of {money(current.grossIncome)} received
+              {projection.basis === 'expected'
+                ? `Assumes ${money(projection.expectedMonthlyIncome ?? 0)}/month ahead`
+                : `Averaged from ${projection.monthsWithIncome} ${
+                    projection.monthsWithIncome === 1 ? 'month' : 'months'
+                  } at ${money(projection.monthlyAverageIncome)}/month`}
+              {!owesNothing && ` · ${percent(headline.effectiveRate)} effective`}
+            </p>
+          ) : (
+            !owesNothing && (
+              <p className="tabular mt-1.5 text-xs text-white/45">
+                {percent(headline.effectiveRate)} of {money(headline.grossIncome)}{' '}
+                received
+              </p>
+            )
+          )}
+
+          {projection.isProjection && (
+            <p className="tabular mt-1 text-xs text-white/35">
+              Logged so far: {money(current.grossIncome)} · tax {money(current.totalTax)}
             </p>
           )}
         </div>
@@ -109,18 +136,19 @@ export function TaxSummaryCard({ overview, onOpenDetail }: Props) {
 
       {saving > 0 && (
         <div className="tabular border-t border-white/10 bg-white/[0.04] px-5 py-3 text-xs text-white/60 sm:px-7">
-          Claiming {money(current.deductibleExpenses)} in expenses has saved you{' '}
+          Claiming {money(headline.deductibleExpenses)} in expenses{' '}
+          {projection.isProjection ? 'is set to save' : 'has saved'} you{' '}
           <span className="font-semibold text-emerald-300">LKR {money(saving)}</span>.
         </div>
       )}
 
-      {owesNothing && current.nextThreshold && current.nextThreshold.remaining > 0 && (
+      {owesNothing && headline.nextThreshold && headline.nextThreshold.remaining > 0 && (
         <div className="tabular border-t border-white/10 bg-white/[0.04] px-5 py-3 text-xs text-white/60 sm:px-7">
-          Tax starts once you receive another{' '}
+          Tax starts once your {projection.isProjection ? 'yearly' : ''} income reaches{' '}
           <span className="font-semibold text-white/85">
-            LKR {money(current.nextThreshold.remaining)}
-          </span>{' '}
-          this year.
+            LKR {money(headline.nextThreshold.grossAt)}
+          </span>
+          .
         </div>
       )}
     </section>
