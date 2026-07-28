@@ -1,77 +1,124 @@
-# CashFlow: Personal Income & Expense Tracker
+# Payground — Income, expenses and Sri Lankan income tax
 
-A streamlined, local-first application designed to track multiple income streams and daily expenses without the clutter of traditional banking apps. Built for developers and freelancers who need a clear view of their net position.
+A mobile-first PWA for tracking consulting income and expenses, and working out
+what you owe the Inland Revenue Department. Built for a single independent
+consultant billing in foreign currency, so tax is treated as a first-class
+feature rather than an export-to-CSV afterthought.
 
-## Core Features
+## Features
 
-* **Multi-Source Income Tracking:** Log earnings from salary, freelance projects, and side hustles with custom categorization.
-* **Granular Expense Logging:** Tag expenses by project, personal needs, or business overhead.
-* **SQL-Backed Data:** Robust data persistence with optimized queries for monthly summaries.
-* **Dashboard Visuals:** Clean overview of monthly burn rates and savings margins.
-* **Export Options:** Quick export to CSV for tax season or deeper analysis.
+- **Income and expense tracking** in LKR, with back-dating so a year of
+  assessment can be reconstructed from real dates.
+- **Deductible expense flagging.** Expenses marked as business costs reduce
+  taxable income, and the app shows what that flagging has saved you.
+- **Income tax engine** for Sri Lankan individuals: personal relief, progressive
+  bands, and the 15% cap on foreign-currency service income.
+- **Deadline tracking** for quarterly self-assessment instalments and the annual
+  return, with a countdown and a record of what you've settled.
+- **Personal and business expenses side by side.** The deductible flag only
+  affects tax; personal spending is tracked exactly the same way.
+- **Spending breakdown by category**, month by month, ranked, with a personal
+  versus claimable split.
+- **Savings view** — cumulative running total across the year, savings rate,
+  and your best and tightest months.
+- **Monthly budgets** per category, with spend-against-plan bars.
+- **Net cash flow chart** across the year of assessment.
+- **AI suggestions** (Gemini) for commentary only — never for arithmetic.
+- **Invitation-only access** with Google sign-in and an admin panel.
 
-## Tech Stack
+## Tech stack
 
-* **Backend:** Node.js / Express
-* **Database:** Firebase
-* **Frontend:** React with a focus on responsive, mobile-first design
-* **State Management:** Redux Toolkit
+- **React 19** + **TypeScript**, built with **Vite 6**
+- **Tailwind CSS v4** (design tokens in `src/index.css`)
+- **Firebase** — Google Auth and Firestore
+- **Recharts** for the cash flow chart, **Motion** for transitions
+- **vite-plugin-pwa** for offline support
+- **Vitest** for the tax engine tests
 
-## Getting Started
+There is no backend server and no SQL database. All persistence is Firestore,
+secured by `firestore.rules`.
 
-### Prerequisites
+## Project structure
 
-* Node.js (v18.x or higher)
-* SQL Server Management Studio (for database setup)
-* NPM or Yarn
+```
+src/
+  lib/tax/            The tax engine — pure, no React, no Firestore
+    rates.ts          Rate tables keyed by year of assessment
+    periods.ts        YA boundaries and statutory deadlines
+    calculate.ts      The computation itself
+    *.test.ts         Anchored on published worked examples
+  lib/
+    transactions.ts   Normalising and aggregating records
+    repository.ts     Every Firestore write
+    format.ts         Currency and date formatting
+  hooks/              Live data subscriptions, tax overview derivation
+  context/            Auth provider
+  components/         UI, with ui/ primitives and forms/
+```
 
-### Installation
+## The tax model
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/username/cashflow-tracker.git
-    cd cashflow-tracker
-    ```
+Sri Lanka's year of assessment runs **1 April to 31 March**. For an individual:
 
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
+```
+gross income − deductible expenses = net business income
+net business income − personal relief = taxable income
+taxable income → progressive bands
+```
 
-3.  **Database Configuration:**
-    Create a `.env` file in the root directory and add your connection string:
-    ```env
-    DB_CONNECTION_STRING=Server=localhost;Database=CashFlowDB;User Id=your_user;Password=your_password;
-    ```
+From YA 2025/26 the personal relief is **LKR 1,800,000** and the bands are 6% on
+the first 1,000,000 of taxable income, then 18%, 24% and 30% on 500,000 each,
+then 36%. For foreign-currency service income remitted through a licensed Sri
+Lankan bank, every marginal rate is **capped at 15%** — so the ladder collapses
+to 6% then 15%. That income was fully **exempt up to YA 2024/25**; the exemption
+ended 1 April 2025.
 
-4.  **Run Migrations:**
-    Execute the provided SQL scripts in the `/db/scripts` folder to initialize the schema and triggers.
+Self-assessment instalments are due **15 August, 15 November, 15 February and
+15 May**, with the annual return due **30 November** after the year ends.
 
-5.  **Launch the App:**
-    ```bash
-    npm run dev
-    ```
+Rates live in `src/lib/tax/rates.ts` as data keyed by year, so a rate change is
+a new table entry rather than a logic change. Tax is always derived from the
+underlying records and never stored, so editing or back-dating a transaction
+updates every figure immediately.
 
-## Project Structure
+> These figures are an estimate to plan with, not tax advice. Confirm anything
+> material with a qualified adviser before filing.
 
-* `/src/api`: Express routes and controller logic.
-* `/src/db`: SQL queries, stored procedures, and triggers.
-* `/src/ui`: React components and styling.
-* `/docs`: API documentation and database schema diagrams.
+## Getting started
 
-## Key Queries
+Requires Node 18 or newer.
 
-This app utilizes optimized SQL triggers to automatically update "Net Balance" tables whenever a new income or expense entry is logged, ensuring the dashboard remains snappy even with thousands of entries.
+```bash
+npm install
+cp .env.example .env   # then fill in your Firebase config
+npm run dev
+```
 
-## Roadmap
+`VITE_ADMIN_EMAIL` sets the bootstrap admin. It must match the literal in
+`firestore.rules`, because security rules cannot read environment variables.
 
-* [ ] Integration with bank APIs for automated syncing.
-* [ ] Dark mode UI overhaul.
-* [ ] Mobile application (React Native).
+Deploy the rules with:
 
-## Contributing
+```bash
+firebase deploy --only firestore:rules
+```
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+## Scripts
 
----
-*Created for personal financial management and technical growth.*
+| Command | What it does |
+|---|---|
+| `npm run dev` | Dev server on port 3000 |
+| `npm run build` | Production build |
+| `npm run preview` | Serve the production build |
+| `npm run lint` | Typecheck with `tsc --noEmit` |
+| `npm test` | Run the tax engine tests |
+
+## Known gaps
+
+- **`VITE_GEMINI_API_KEY` ships in the client bundle** and can be extracted from
+  the deployed JavaScript. It needs to move behind a server endpoint before the
+  app is shared publicly.
+- No recurring transactions — regular income is entered each time.
+- No multi-currency support; amounts are recorded in LKR.
+- No accounts or wallets, so there is no transfer concept or net worth view.
+- Only the tax engine has tests; the UI has none.

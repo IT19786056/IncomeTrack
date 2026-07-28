@@ -1,22 +1,22 @@
 // ===============================================================
-// Assumed Data Model
+// Data model
 // ===============================================================
 //
-// Collection: /users/{userId}
-// Fields:
-//   - uid: string (required)
-//   - displayName: string (optional)
-//   - email: string (required)
-//   - currency: string (default: LKR)
-//   - role: string (admin|user)
-//   - isInvited: boolean
-//   - createdAt: timestamp
+// /users/{userId}
+//   uid, displayName, email, currency, role (admin|user), isInvited, createdAt
 //
-// Collection: /invitations/{email}
-// Fields:
-//   - email: string (required)
-//   - invitedBy: string (UID)
-//   - createdAt: timestamp
+// /invitations/{email}          document id IS the lowercased email
+//   email, invitedBy, status (pending|accepted), createdAt
+//
+// /income/{id}                  userId, amount, source, date, description, createdAt
+// /expenses/{id}                userId, amount, category, date, description,
+//                               deductible, createdAt
+// /categories/{id}              userId, name, budget, deductible, createdAt
+//
+// /taxProfiles/{userId}         userId, regime, hasTin, hasFiledBefore, updatedAt
+// /taxFilings/{userId_YA_period}
+//                               userId, yaStartYear, period, status, amountPaid,
+//                               paidAt, createdAt
 //
 // ===============================================================
 
@@ -32,10 +32,29 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function callerEmail() {
+      return isAuthenticated() && request.auth.token.email != null
+        ? request.auth.token.email.lower()
+        : '';
+    }
+
+    // Security rules cannot read environment variables, so the first admin has
+    // to be a literal here. Keep this in step with VITE_ADMIN_EMAIL, which the
+    // client uses to decide the role when creating that first profile.
+    function isBootstrapAdmin() {
+      return isAuthenticated()
+             && callerEmail() == 'ravindijason@gmail.com'
+             && request.auth.token.email_verified == true;
+    }
+
+    // exists() is checked first: get() on a missing document fails the whole
+    // rule evaluation, which would lock out a user mid-signup.
     function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "ravindijason@gmail.com" && request.auth.token.email_verified == true));
+      return isBootstrapAdmin()
+             || (isAuthenticated()
+                 && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+                 && get(/databases/$(database)/documents/users/$(request.auth.uid))
+                      .data.role == 'admin');
     }
 
     function isInvited(email) {
@@ -48,37 +67,78 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    // A record the caller owns, where ownership cannot be reassigned by an update.
+    function ownsExisting() {
+      return isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+    function ownsIncoming() {
+      return isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+    function keepsOwner() {
+      return request.resource.data.userId == resource.data.userId;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (isInvited(request.resource.data.email) || isAdmin());
-      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
+      // Invitation-only: a profile can only be created for an invited address,
+      // or by the bootstrap admin who by definition has no invitation.
+      allow create: if isOwner(userId)
+                    && isValidUser(request.resource.data)
+                    && (isInvited(request.resource.data.email.lower())
+                        || isBootstrapAdmin());
+      // Users may edit their own profile but never their own role.
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role)
+                    || isAdmin();
     }
 
     match /invitations/{email} {
-      allow read: if isAuthenticated();
-      allow create, delete: if isAdmin();
-      allow update: if isAuthenticated() && 
-        (isAdmin() || (request.auth.token.email.lower() == email.lower() && 
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && 
-         request.resource.data.status == 'accepted'));
-    }
+      // Reading a single invitation is limited to the address it belongs to, so
+      // the sign-in check still works. Listing the collection — which would
+      // expose every invited address — stays admin-only.
+      allow get: if isAdmin() || (isAuthenticated() && callerEmail() == email.lower());
+      allow list: if isAdmin();
 
-    match /expenses/{expenseId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, delete: if isAdmin();
+      // The invitee may only flip their own invitation to accepted.
+      allow update: if isAdmin()
+                    || (isAuthenticated()
+                        && callerEmail() == email.lower()
+                        && request.resource.data.diff(resource.data)
+                             .affectedKeys().hasOnly(['status'])
+                        && request.resource.data.status == 'accepted');
     }
 
     match /income/{incomeId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read, delete: if ownsExisting();
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming() && keepsOwner();
+    }
+
+    match /expenses/{expenseId} {
+      allow read, delete: if ownsExisting();
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming() && keepsOwner();
     }
 
     match /categories/{categoryId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read, delete: if ownsExisting();
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming() && keepsOwner();
+    }
+
+    // Tax data is strictly private: not even an admin needs to read it.
+    match /taxProfiles/{userId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+                            && request.resource.data.userId == userId;
+    }
+
+    match /taxFilings/{filingId} {
+      allow read, delete: if ownsExisting();
+      allow create: if ownsIncoming()
+                    && request.resource.data.yaStartYear is int
+                    && request.resource.data.period in ['Q1', 'Q2', 'Q3', 'Q4', 'RETURN'];
+      allow update: if ownsExisting() && ownsIncoming() && keepsOwner();
     }
 
     match /{document=**} {
