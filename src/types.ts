@@ -1,3 +1,13 @@
+import type { Timestamp } from 'firebase/firestore';
+import type { FilingPeriod, TaxRegime } from './lib/tax';
+
+/**
+ * Firestore hands back a Timestamp on read, but a document written with
+ * serverTimestamp() briefly echoes back null from the local cache before the
+ * server value lands. Anything reading these fields must handle null.
+ */
+export type FirestoreDate = Timestamp | null;
+
 export interface UserProfile {
   uid: string;
   displayName: string | null;
@@ -5,7 +15,7 @@ export interface UserProfile {
   currency: string;
   role: 'admin' | 'user';
   isInvited: boolean;
-  createdAt: any;
+  createdAt: FirestoreDate;
 }
 
 export interface Invitation {
@@ -13,7 +23,7 @@ export interface Invitation {
   email: string;
   invitedBy: string;
   status: 'pending' | 'accepted';
-  createdAt: any;
+  createdAt: FirestoreDate;
 }
 
 export interface Expense {
@@ -21,9 +31,16 @@ export interface Expense {
   userId: string;
   amount: number;
   category: string;
-  date: any;
-  description: string;
-  createdAt: any;
+  /** When the money was spent — set by the user, not the clock. */
+  date: FirestoreDate;
+  description?: string;
+  /**
+   * Whether this expense is claimable against business income. This is the
+   * field that decides taxable income, so it is always written explicitly
+   * rather than inferred from the category.
+   */
+  deductible: boolean;
+  createdAt: FirestoreDate;
 }
 
 export interface Income {
@@ -31,9 +48,10 @@ export interface Income {
   userId: string;
   amount: number;
   source: string;
-  date: any;
-  description: string;
-  createdAt: any;
+  /** When the money was received — set by the user, not the clock. */
+  date: FirestoreDate;
+  description?: string;
+  createdAt: FirestoreDate;
 }
 
 export interface Category {
@@ -41,8 +59,50 @@ export interface Category {
   userId: string;
   name: string;
   budget: number;
+  /** Default deductibility for expenses in this category. */
+  deductible?: boolean;
   icon?: string;
   color?: string;
+  createdAt?: FirestoreDate;
+}
+
+/** A user's tax situation. One document per user, keyed by uid. */
+export interface TaxProfile {
+  userId: string;
+  regime: TaxRegime;
+  /** Whether they hold a Taxpayer Identification Number. */
+  hasTin: boolean;
+  /** Whether they have ever filed a return. */
+  hasFiledBefore: boolean;
+  updatedAt: FirestoreDate;
+}
+
+/** A settled instalment or return, so the app stops nagging about it. */
+export interface TaxFiling {
+  id?: string;
+  userId: string;
+  /** Year of assessment this belongs to, as a start year. YA 2026/27 → 2026. */
+  yaStartYear: number;
+  period: FilingPeriod;
+  status: 'paid' | 'filed';
+  amountPaid: number;
+  paidAt: FirestoreDate;
+  createdAt: FirestoreDate;
+}
+
+/**
+ * A normalised income or expense for display. Building this once removes the
+ * need to sniff shapes at render time, and guarantees a usable Date.
+ */
+export interface TransactionView {
+  id: string;
+  kind: 'income' | 'expense';
+  amount: number;
+  /** Expense category or income source. */
+  label: string;
+  description?: string;
+  date: Date;
+  deductible: boolean;
 }
 
 export enum OperationType {
@@ -70,5 +130,5 @@ export interface FirestoreErrorInfo {
       email: string | null;
       photoUrl: string | null;
     }[];
-  }
+  };
 }

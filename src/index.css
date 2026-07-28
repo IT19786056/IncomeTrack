@@ -1,1 +1,122 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/**
+ * Design tokens.
+ *
+ * No web fonts by design: this is an offline-capable PWA, and a system stack
+ * renders instantly with no network dependency. Personality comes from the
+ * type scale and the tabular figures instead.
+ */
+@theme {
+  --color-brand-50: #f5f3ff;
+  --color-brand-100: #ede9fe;
+  --color-brand-200: #ddd6fe;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7c3aed;
+  --color-brand-700: #6d28d9;
+  --color-brand-900: #4c1d95;
+
+  /* Near-black with a violet cast, so dark surfaces relate to the brand. */
+  --color-ink-800: #1c1826;
+  --color-ink-900: #14111c;
+  --color-ink-950: #0b0910;
+
+  /**
+   * Money colours are split into marks and ink.
+   *
+   * The mark steps are a validated diverging pair: teal-600 against rose-600
+   * separates at ΔE 10.2 under deuteranopia, where the obvious green/red
+   * choice collapses to 5.8 and fails. Marks only need 3:1 against the
+   * surface; text needs 4.5:1, hence the darker ink steps.
+   */
+  --color-money-in: #0d9488;
+  --color-money-out: #e11d48;
+  --color-money-in-ink: #0f766e;
+  --color-money-out-ink: #be123c;
+  --color-money-in-ink-dark: #2dd4bf;
+  --color-money-out-ink-dark: #fb7185;
+  --color-warn: #d97706;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Mono', Menlo, Consolas,
+    monospace;
+
+  --radius-card: 1.75rem;
+  --radius-tile: 1.25rem;
+}
+
+@layer base {
+  html {
+    /* Prevent iOS bumping font sizes when a phone is rotated. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    /* The single most common mobile bug: a wide child scrolling the page. */
+    overflow-x: hidden;
+    font-family: var(--font-sans);
+    background-color: var(--color-brand-50);
+    color: var(--color-ink-900);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-color: var(--color-ink-950);
+      color: #f4f2f8;
+    }
+  }
+
+  /* Every interactive element gets a visible, branded focus ring. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+
+  /* Stop iOS Safari zooming in when a text field is focused. */
+  input,
+  select,
+  textarea {
+    font-size: max(1rem, 16px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Figures must align in columns; proportional digits make totals wobble. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Clear the home-indicator area on iPhones. */
+  .pb-safe {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .mb-safe {
+    margin-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  .pt-safe {
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+  }
+}

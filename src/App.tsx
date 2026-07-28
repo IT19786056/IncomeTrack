@@ -3,770 +3,450 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, createContext, useContext } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, signInWithGoogle, logout, db } from './firebase';
+import { useMemo, useState } from 'react';
 import { registerSW } from 'virtual:pwa-register';
-import { 
-  collection, 
-  onSnapshot, 
-  query, 
-  where, 
-  orderBy, 
-  addDoc, 
-  serverTimestamp,
-  Timestamp,
-  getDoc,
-  doc,
-  setDoc,
-  getDocFromServer,
-  deleteDoc
-} from 'firebase/firestore';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Plus, 
-  TrendingDown, 
-  TrendingUp, 
-  LogOut, 
-  Wallet, 
-  Tag, 
-  ChevronRight,
-  AlertCircle,
-  Sparkles,
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  ArrowDownLeft,
   ArrowUpRight,
-  ArrowDownRight,
-  UserPlus,
-  ShieldCheck,
-  CreditCard,
+  LogOut,
   Target,
-  History,
-  LayoutDashboard,
-  Search,
-  MoreVertical,
-  Share2,
-  Copy
+  TriangleAlert,
 } from 'lucide-react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-} from 'recharts';
-import { format } from 'date-fns';
-import { GoogleGenAI } from "@google/genai";
-import { Expense, Income, Category, OperationType, UserProfile, Invitation } from './types';
-import { handleFirestoreError } from './lib/firestoreUtils';
+import { logout } from './firebase';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { useFinancialData, useInvitations } from './hooks/useFinancialData';
+import { useTaxOverview } from './hooks/useTaxOverview';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { Login } from './components/Login';
+import { BalanceCard } from './components/BalanceCard';
+import { TaxSummaryCard } from './components/TaxSummaryCard';
+import { TaxScreen } from './components/TaxScreen';
+import { MonthlyFlowChart } from './components/MonthlyFlowChart';
+import { SavingsChart } from './components/SavingsChart';
+import { SpendingBreakdown } from './components/SpendingBreakdown';
+import { BudgetList } from './components/BudgetList';
+import { TransactionList } from './components/TransactionList';
+import { AiInsights } from './components/AiInsights';
+import { AdminPanel } from './components/AdminPanel';
+import { BottomNav, type View } from './components/BottomNav';
+import { Sheet } from './components/ui/Sheet';
+import { IncomeForm } from './components/forms/IncomeForm';
+import { ExpenseForm } from './components/forms/ExpenseForm';
+import { CategoryForm } from './components/forms/CategoryForm';
+import { InviteForm } from './components/forms/InviteForm';
+import { TaxSetupForm } from './components/forms/TaxSetupForm';
+import { deleteExpense, deleteIncome, markFilingSettled, unmarkFilingSettled } from './lib/repository';
+import {
+  categoryBudgets,
+  totals,
+  withinMonth,
+  withinYa,
+  yearsWithActivity,
+} from './lib/transactions';
+import { monthLabel, yaStartYearForDate, type FilingPeriod } from './lib/tax';
+import type { TransactionView } from './types';
 
 registerSW({ immediate: true });
-// --- Context ---
-const AuthContext = createContext<{
-  user: User | null;
-  profile: UserProfile | null;
-  loading: boolean;
-} | null>(null);
 
-const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within AuthProvider");
-  return context;
-};
-
-// --- Components ---
-
-const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
-  const [hasError, setHasError] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    const handleError = (event: ErrorEvent) => {
-      setHasError(true);
-      setError(event.error);
-    };
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
-  }, []);
-
-  if (hasError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-red-50 dark:bg-red-950 p-4 transition-colors duration-300">
-        <div className="bg-white dark:bg-gray-900 p-8 rounded-[40px] shadow-xl max-w-md w-full text-center border border-red-100 dark:border-red-900">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Something went wrong</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
-            {error?.message.startsWith('{') ? "Access denied. You might not have an invitation." : error?.message || "An unexpected error occurred."}
-          </p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="bg-red-500 text-white px-8 py-3 rounded-full font-bold hover:bg-red-600 transition-all active:scale-95"
-          >
-            Reload App
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
-};
-
-const Login = () => {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[#FDF7FF] dark:bg-[#121212] p-4 transition-colors duration-300">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-gray-900 p-12 rounded-[48px] shadow-2xl max-w-md w-full text-center border border-purple-100 dark:border-purple-900/30"
-      >
-        <div className="w-24 h-24 bg-purple-600 rounded-[32px] flex items-center justify-center mx-auto mb-10 shadow-2xl shadow-purple-200 dark:shadow-none">
-          <Wallet className="w-12 h-12 text-white" />
-        </div>
-        <h1 className="text-4xl font-black text-gray-900 dark:text-white mb-4 tracking-tight">Payground</h1>
-        <p className="text-gray-500 dark:text-gray-400 mb-12 text-lg leading-relaxed font-medium">
-          The expressive way to manage your LKR wealth.
-        </p>
-        <button 
-          onClick={signInWithGoogle}
-          className="w-full bg-purple-600 text-white py-5 rounded-[24px] font-black text-lg hover:bg-purple-700 transition-all shadow-xl shadow-purple-100 dark:shadow-none flex items-center justify-center gap-4 active:scale-95"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-7 h-7 bg-white rounded-full p-1.5" alt="Google" />
-          Sign in with Google
-        </button>
-        <p className="mt-8 text-sm text-gray-400 dark:text-gray-500">
-          Invitation only. Contact admin for access.
-        </p>
-      </motion.div>
-    </div>
-  );
-};
-
-const Dashboard = () => {
-  const { user, profile } = useAuth();
-  const [view, setView] = useState<'dashboard' | 'admin'>('dashboard');
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [income, setIncome] = useState<Income[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [isAddingExpense, setIsAddingExpense] = useState(false);
-  const [isAddingIncome, setIsAddingIncome] = useState(false);
-  const [isAddingCategory, setIsAddingCategory] = useState(false);
-  const [isInviting, setIsInviting] = useState(false);
-  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
-  const [aiInsight, setAiInsight] = useState<string | null>(null);
-  const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-
-    const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), where('userId', '==', user.uid), orderBy('date', 'desc')), 
-      (s) => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() } as Expense))),
-      (e) => handleFirestoreError(e, OperationType.LIST, 'expenses'));
-
-    const unsubIncome = onSnapshot(query(collection(db, 'income'), where('userId', '==', user.uid), orderBy('date', 'desc')), 
-      (s) => setIncome(s.docs.map(d => ({ id: d.id, ...d.data() } as Income))),
-      (e) => handleFirestoreError(e, OperationType.LIST, 'income'));
-
-    const unsubCategories = onSnapshot(query(collection(db, 'categories'), where('userId', '==', user.uid)), 
-      (s) => setCategories(s.docs.map(d => ({ id: d.id, ...d.data() } as Category))),
-      (e) => handleFirestoreError(e, OperationType.LIST, 'categories'));
-
-    let unsubInvitations = () => {};
-    if (profile?.role === 'admin') {
-      unsubInvitations = onSnapshot(collection(db, 'invitations'), 
-        (s) => setInvitations(s.docs.map(d => ({ id: d.id, ...d.data() } as Invitation))),
-        (e) => console.error("Invitation fetch error", e));
-    }
-
-    return () => {
-      unsubExpenses();
-      unsubIncome();
-      unsubCategories();
-      unsubInvitations();
-    };
-  }, [user, profile]);
-
-  const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalIncome = income.reduce((acc, curr) => acc + curr.amount, 0);
-  const balance = totalIncome - totalExpenses;
-
-  const generateAIInsight = async () => {
-    if (!user) return;
-    setIsGeneratingInsight(true);
-    try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Gemini API key is missing.");
-      const ai = new GoogleGenAI({ apiKey });
-      const model = "gemini-3-flash-preview";
-      const expenseSummary = expenses.map(e => `${e.category}: LKR ${e.amount}`).join(', ');
-      const incomeSummary = income.map(i => `${i.source}: LKR ${i.amount}`).join(', ');
-      const prompt = `As a Sri Lankan financial expert, analyze this monthly data in LKR:
-      Income: ${incomeSummary} (Total: LKR ${totalIncome})
-      Expenses: ${expenseSummary} (Total: LKR ${totalExpenses})
-      Provide 3 concise, actionable insights to improve savings in the current Sri Lankan economy. Keep it under 100 words.`;
-      const response = await ai.models.generateContent({ model, contents: prompt });
-      setAiInsight(response.text || "No insights available.");
-    } catch (error) {
-      setAiInsight("Failed to generate insights.");
-    } finally {
-      setIsGeneratingInsight(false);
-    }
-  };
-
-  const copyInviteLink = (email?: string) => {
-    const url = window.location.origin;
-    const text = email ? `You've been invited to Payground! Login here: ${url}` : url;
-    navigator.clipboard.writeText(text);
-    alert("Link copied to clipboard! Send this to the invited user.");
-  };
-
-  const deleteInvitation = async (id: string) => {
-    if (profile?.role !== 'admin') return;
-    try {
-      await deleteDoc(doc(db, 'invitations', id));
-    } catch (error) {
-      console.error("Delete invitation error", error);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#FDF7FF] dark:bg-[#0A0A0A] pb-32 transition-colors duration-300">
-      {/* Top Bar */}
-      <div className="px-6 pt-8 pb-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center">
-            <LayoutDashboard className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-          </div>
-          <h2 className="text-xl font-black text-gray-900 dark:text-white">
-            {view === 'dashboard' ? 'Payground' : 'Admin Settings'}
-          </h2>
-        </div>
-        <div className="flex items-center gap-3">
-          {profile?.role === 'admin' && (
-            <button 
-              onClick={() => setView(view === 'dashboard' ? 'admin' : 'dashboard')} 
-              className={`p-2.5 rounded-full transition-all ${view === 'admin' ? 'bg-purple-600 text-white' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'}`}
-            >
-              <ShieldCheck className="w-5 h-5" />
-            </button>
-          )}
-          <img src={user?.photoURL || ''} className="w-10 h-10 rounded-full border-2 border-white dark:border-gray-800 shadow-sm" alt="Profile" />
-        </div>
-      </div>
-
-      <AnimatePresence mode="wait">
-        {view === 'dashboard' ? (
-          <motion.main 
-            key="dashboard"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            className="px-6 space-y-8"
-          >
-            {/* Main Card - Expressive Material 3 */}
-            <motion.div 
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              className="bg-purple-400 dark:bg-purple-600 p-8 rounded-[48px] text-black dark:text-white shadow-2xl shadow-purple-200 dark:shadow-none relative overflow-hidden"
-            >
-              <div className="relative z-10">
-                <div className="flex justify-between items-start mb-4">
-                  <p className="font-bold opacity-70">Available cash</p>
-                  <p className="font-mono text-sm opacity-50">••• {user?.uid.slice(-4)}</p>
-                </div>
-                <h1 className="text-6xl font-black mb-10 tracking-tighter">
-                  <span className="text-3xl font-bold mr-1">LKR</span>
-                  {balance.toLocaleString()}
-                </h1>
-                <div className="flex gap-3">
-                  <button 
-                    onClick={() => setIsAddingIncome(true)}
-                    className="flex-1 bg-white/20 dark:bg-black/20 backdrop-blur-xl py-4 rounded-[24px] font-black text-sm hover:bg-white/30 transition-all active:scale-95"
-                  >
-                    Add money
-                  </button>
-                  <button 
-                    onClick={() => setIsAddingExpense(true)}
-                    className="flex-1 bg-white/20 dark:bg-black/20 backdrop-blur-xl py-4 rounded-[24px] font-black text-sm hover:bg-white/30 transition-all active:scale-95"
-                  >
-                    Transfer
-                  </button>
-                  <div className="w-16 bg-white/20 dark:bg-black/20 backdrop-blur-xl rounded-[24px] flex items-center justify-center">
-                    <CreditCard className="w-6 h-6" />
-                  </div>
-                </div>
-              </div>
-              {/* Decorative shapes */}
-              <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
-              <div className="absolute -left-10 -top-10 w-48 h-48 bg-purple-300/20 rounded-full blur-3xl"></div>
-            </motion.div>
-
-            {/* Quick Actions / Favorites */}
-            <section>
-              <div className="flex items-center gap-2 mb-4 px-2">
-                <div className="bg-purple-100 dark:bg-purple-900/30 px-4 py-2 rounded-full flex items-center gap-2">
-                  <History className="w-4 h-4 text-purple-600" />
-                  <span className="text-xs font-black text-purple-600 uppercase tracking-widest">Cards & passes</span>
-                  <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full">3</span>
-                </div>
-              </div>
-              <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-6 px-2">Favorites</h3>
-              <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
-                <FavoriteItem icon={<TrendingUp />} label="Deposit" color="bg-purple-50 dark:bg-purple-900/20" onClick={() => setIsAddingIncome(true)} />
-                <FavoriteItem icon={<Target />} label="Goals" color="bg-pink-50 dark:bg-pink-900/20" onClick={() => setIsAddingCategory(true)} />
-                <FavoriteItem icon={<ShieldCheck />} label="Credit score" color="bg-blue-50 dark:bg-blue-900/20" onClick={() => alert("Credit score feature coming soon!")} />
-                <div className="flex flex-col items-center gap-2 min-w-[70px]">
-                  <img src="https://picsum.photos/seed/pia/100" className="w-16 h-16 rounded-full object-cover grayscale" alt="Pia" />
-                  <span className="text-xs font-bold text-gray-500">Pia</span>
-                </div>
-                <div className="flex flex-col items-center gap-2 min-w-[70px]">
-                  <img src="https://picsum.photos/seed/marty/100" className="w-16 h-16 rounded-full object-cover grayscale" alt="Marty" />
-                  <span className="text-xs font-bold text-gray-500">Marty</span>
-                </div>
-              </div>
-            </section>
-
-            {/* AI Insights Section */}
-            <section className="bg-white dark:bg-gray-900 p-8 rounded-[40px] border border-purple-50 dark:border-purple-900/20">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-3">
-                  <Sparkles className="w-6 h-6 text-purple-500" /> AI Insights
-                </h3>
-                <button onClick={generateAIInsight} disabled={isGeneratingInsight} className="text-purple-600 font-black text-sm uppercase tracking-wider">
-                  {isGeneratingInsight ? "Thinking..." : "Refresh"}
-                </button>
-              </div>
-              <AnimatePresence mode="wait">
-                {aiInsight ? (
-                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-gray-600 dark:text-gray-400 leading-relaxed font-medium italic">
-                    "{aiInsight}"
-                  </motion.p>
-                ) : (
-                  <p className="text-gray-400 text-center py-4 font-medium">Get personalized Sri Lankan financial advice.</p>
-                )}
-              </AnimatePresence>
-            </section>
-
-            {/* Recent Activity */}
-            <section className="bg-white dark:bg-gray-900 rounded-[48px] p-8">
-              <div className="flex justify-between items-center mb-8">
-                <h3 className="text-2xl font-black text-gray-900 dark:text-white">Payments</h3>
-                <MoreVertical className="w-6 h-6 text-gray-400" />
-              </div>
-              <div className="space-y-6">
-                {[...expenses, ...income]
-                  .sort((a, b) => b.date.seconds - a.date.seconds)
-                  .slice(0, 8)
-                  .map((item, i) => {
-                    const isExpense = 'category' in item;
-                    return (
-                      <div key={i} className="flex items-center justify-between group">
-                        <div className="flex items-center gap-5">
-                          <div className={`w-14 h-14 rounded-[24px] flex items-center justify-center ${isExpense ? 'bg-pink-50 dark:bg-pink-900/20 text-pink-500' : 'bg-green-50 dark:bg-green-900/20 text-green-500'}`}>
-                            {isExpense ? <ArrowUpRight className="w-7 h-7" /> : <ArrowDownRight className="w-7 h-7" />}
-                          </div>
-                          <div>
-                            <p className="font-black text-lg text-gray-900 dark:text-white">{isExpense ? item.category : item.source}</p>
-                            <p className="text-sm font-bold text-gray-400">{format(item.date.toDate(), 'MMM dd, HH:mm')}</p>
-                          </div>
-                        </div>
-                        <p className={`text-xl font-black ${isExpense ? 'text-pink-500' : 'text-green-500'}`}>
-                          {isExpense ? '-' : '+'}{item.amount.toLocaleString()}
-                        </p>
-                      </div>
-                    );
-                  })}
-              </div>
-            </section>
-          </motion.main>
-        ) : (
-          <motion.main 
-            key="admin"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="px-6 space-y-8"
-          >
-            <section className="bg-white dark:bg-gray-900 rounded-[48px] p-8">
-              <div className="flex justify-between items-center mb-8">
-                <h3 className="text-2xl font-black text-gray-900 dark:text-white">User Invitations</h3>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => copyInviteLink()}
-                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400"
-                    title="Copy App URL"
-                  >
-                    <Share2 className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={() => setIsInviting(true)}
-                    className="bg-purple-600 text-white px-6 py-3 rounded-full font-black text-sm flex items-center gap-2"
-                  >
-                    <UserPlus className="w-4 h-4" /> Invite User
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-4">
-                {invitations.length > 0 ? invitations.map((invite, i) => (
-                  <div key={i} className="flex items-center justify-between p-6 bg-gray-50 dark:bg-gray-800/50 rounded-[32px]">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center">
-                        <UserPlus className="w-6 h-6 text-purple-600" />
-                      </div>
-                      <div>
-                        <p className="font-black text-gray-900 dark:text-white">{invite.email}</p>
-                        <p className={`text-xs font-bold uppercase tracking-widest ${invite.status === 'accepted' ? 'text-green-500' : 'text-orange-500'}`}>
-                          {invite.status}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => copyInviteLink(invite.email)}
-                        className="p-2 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-full"
-                        title="Copy Invite Message"
-                      >
-                        <Copy className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={() => invite.id && deleteInvitation(invite.id)}
-                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full"
-                        title="Delete Invitation"
-                      >
-                        <AlertCircle className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                )) : (
-                  <p className="text-center py-12 text-gray-400 font-medium">No invitations sent yet.</p>
-                )}
-              </div>
-            </section>
-
-            <section className="bg-purple-50 dark:bg-purple-900/10 p-8 rounded-[40px] border border-purple-100 dark:border-purple-900/20">
-              <h4 className="text-lg font-black text-purple-900 dark:text-purple-100 mb-4">Admin Notice</h4>
-              <p className="text-sm text-purple-700 dark:text-purple-300 leading-relaxed">
-                As an admin, you can manage who has access to the Payground app. 
-                Invited users will receive an automated email notification (simulated) 
-                and can log in using their Google account once their email is added to the invitation list.
-              </p>
-            </section>
-          </motion.main>
-        )}
-      </AnimatePresence>
-
-      {/* Bottom Nav Simulation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-black/80 backdrop-blur-2xl px-10 py-6 flex justify-between items-center border-t border-gray-100 dark:border-gray-800 z-40">
-        <button onClick={() => alert("Dashboard is active")}><LayoutDashboard className="w-7 h-7 text-purple-600" /></button>
-        <button onClick={() => alert("Search coming soon")}><Search className="w-7 h-7 text-gray-400" /></button>
-        <div className="relative">
-          <button 
-            onClick={() => setIsQuickAddOpen(!isQuickAddOpen)}
-            className="w-14 h-14 bg-purple-600 rounded-2xl flex items-center justify-center shadow-xl shadow-purple-200 dark:shadow-none -mt-12 active:scale-90 transition-transform"
-          >
-            <Plus className={`w-8 h-8 text-white transition-transform ${isQuickAddOpen ? 'rotate-45' : ''}`} />
-          </button>
-          <AnimatePresence>
-            {isQuickAddOpen && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10, scale: 0.8 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.8 }}
-                className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 p-4 rounded-3xl shadow-2xl border border-purple-50 dark:border-purple-900/20 flex flex-col gap-2 min-w-[160px]"
-              >
-                <button onClick={() => { setIsAddingExpense(true); setIsQuickAddOpen(false); }} className="flex items-center gap-3 p-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-2xl text-gray-700 dark:text-gray-200 font-bold">
-                  <ArrowUpRight className="w-5 h-5 text-pink-500" /> Expense
-                </button>
-                <button onClick={() => { setIsAddingIncome(true); setIsQuickAddOpen(false); }} className="flex items-center gap-3 p-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-2xl text-gray-700 dark:text-gray-200 font-bold">
-                  <ArrowDownRight className="w-5 h-5 text-green-500" /> Income
-                </button>
-                <button onClick={() => { setIsAddingCategory(true); setIsQuickAddOpen(false); }} className="flex items-center gap-3 p-3 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-2xl text-gray-700 dark:text-gray-200 font-bold">
-                  <Target className="w-5 h-5 text-purple-500" /> Category
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-        <button onClick={() => alert("History coming soon")}><History className="w-7 h-7 text-gray-400" /></button>
-        <button onClick={logout}><LogOut className="w-7 h-7 text-gray-400" /></button>
-      </div>
-
-      {/* Modals */}
-      <AnimatePresence>
-        {(isAddingExpense || isAddingIncome || isInviting || isAddingCategory) && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-4">
-            <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="bg-white dark:bg-gray-900 w-full max-w-md rounded-[48px] p-10 shadow-2xl">
-              <div className="flex justify-between items-center mb-8">
-                <h3 className="text-3xl font-black text-gray-900 dark:text-white">
-                  {isAddingExpense ? 'Expense' : isAddingIncome ? 'Income' : isInviting ? 'Invite' : 'Category'}
-                </h3>
-                <button onClick={() => { setIsAddingExpense(false); setIsAddingIncome(false); setIsInviting(false); setIsAddingCategory(false); }} className="p-3 bg-gray-100 dark:bg-gray-800 rounded-full">
-                  <ChevronRight className="w-6 h-6 rotate-90" />
-                </button>
-              </div>
-              {isAddingExpense && <ExpenseForm onComplete={() => setIsAddingExpense(false)} categories={categories} />}
-              {isAddingIncome && <IncomeForm onComplete={() => setIsAddingIncome(false)} />}
-              {isInviting && <InviteForm onComplete={() => setIsInviting(false)} />}
-              {isAddingCategory && <CategoryForm onComplete={() => setIsAddingCategory(false)} />}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const FavoriteItem = ({ icon, label, color, onClick }: { icon: React.ReactNode, label: string, color: string, onClick?: () => void }) => (
-  <button onClick={onClick} className="flex flex-col items-center gap-3 min-w-[80px] active:scale-95 transition-transform">
-    <div className={`w-16 h-16 ${color} rounded-[28px] flex items-center justify-center text-purple-600`}>
-      {React.cloneElement(icon as React.ReactElement, { className: "w-7 h-7" })}
-    </div>
-    <span className="text-xs font-black text-gray-500 uppercase tracking-tighter">{label}</span>
-  </button>
-);
-
-const ExpenseForm = ({ onComplete, categories }: { onComplete: () => void, categories: Category[] }) => {
-  const { user } = useAuth();
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !amount || !category) return;
-    setLoading(true);
-    try {
-      await addDoc(collection(db, 'expenses'), {
-        userId: user.uid,
-        amount: parseFloat(amount),
-        category,
-        date: Timestamp.now(),
-        createdAt: serverTimestamp()
-      });
-      onComplete();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'expenses');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <input type="number" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 text-3xl font-black focus:ring-4 focus:ring-purple-500/20" placeholder="0.00" />
-      <select required value={category} onChange={(e) => setCategory(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 font-black focus:ring-4 focus:ring-purple-500/20">
-        <option value="">Select Category</option>
-        {categories.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}
-        <option value="Food">Food</option>
-        <option value="Transport">Transport</option>
-        <option value="Leisure">Leisure</option>
-      </select>
-      <button type="submit" disabled={loading} className="w-full bg-purple-600 text-white py-6 rounded-[24px] font-black text-xl shadow-xl shadow-purple-200 dark:shadow-none disabled:opacity-50">
-        {loading ? 'Processing...' : 'Confirm'}
-      </button>
-    </form>
-  );
-};
-
-const IncomeForm = ({ onComplete }: { onComplete: () => void }) => {
-  const { user } = useAuth();
-  const [amount, setAmount] = useState('');
-  const [source, setSource] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !amount || !source) return;
-    setLoading(true);
-    try {
-      await addDoc(collection(db, 'income'), {
-        userId: user.uid,
-        amount: parseFloat(amount),
-        source,
-        date: Timestamp.now(),
-        createdAt: serverTimestamp()
-      });
-      onComplete();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'income');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <input type="number" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 text-3xl font-black focus:ring-4 focus:ring-green-500/20" placeholder="0.00" />
-      <input type="text" required value={source} onChange={(e) => setSource(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 font-black focus:ring-4 focus:ring-green-500/20" placeholder="Source (e.g. Salary)" />
-      <button type="submit" disabled={loading} className="w-full bg-green-500 text-white py-6 rounded-[24px] font-black text-xl shadow-xl shadow-green-200 dark:shadow-none disabled:opacity-50">
-        {loading ? 'Processing...' : 'Confirm'}
-      </button>
-    </form>
-  );
-};
-
-const InviteForm = ({ onComplete }: { onComplete: () => void }) => {
-  const { user } = useAuth();
-  const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !email) return;
-    setLoading(true);
-    try {
-      await setDoc(doc(db, 'invitations', email.toLowerCase()), {
-        email: email.toLowerCase(),
-        invitedBy: user.uid,
-        status: 'pending',
-        createdAt: serverTimestamp()
-      });
-      onComplete();
-    } catch (error) {
-      alert("Failed to invite. You must be an admin.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 font-black focus:ring-4 focus:ring-purple-500/20" placeholder="user@example.com" />
-      <button type="submit" disabled={loading} className="w-full bg-purple-600 text-white py-6 rounded-[24px] font-black text-xl disabled:opacity-50">
-        {loading ? 'Inviting...' : 'Send Invite'}
-      </button>
-    </form>
-  );
-};
-
-const CategoryForm = ({ onComplete }: { onComplete: () => void }) => {
-  const { user } = useAuth();
-  const [name, setName] = useState('');
-  const [budget, setBudget] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !name || !budget) return;
-    setLoading(true);
-    try {
-      await addDoc(collection(db, 'categories'), {
-        userId: user.uid,
-        name,
-        budget: parseFloat(budget),
-        createdAt: serverTimestamp()
-      });
-      onComplete();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'categories');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 font-black focus:ring-4 focus:ring-purple-500/20" placeholder="Category Name" />
-      <input type="number" required value={budget} onChange={(e) => setBudget(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-[24px] p-6 font-black focus:ring-4 focus:ring-purple-500/20" placeholder="Monthly Budget" />
-      <button type="submit" disabled={loading} className="w-full bg-purple-600 text-white py-6 rounded-[24px] font-black text-xl disabled:opacity-50">
-        {loading ? 'Adding...' : 'Add Category'}
-      </button>
-    </form>
-  );
-};
-
-const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        
-        if (!userSnap.exists()) {
-          // Check if invited or is the first admin
-          const isAdminEmail = user.email === "ravindijason@gmail.com";
-          const inviteRef = doc(db, 'invitations', user.email?.toLowerCase() || '');
-          const inviteSnap = await getDoc(inviteRef);
-
-          if (isAdminEmail || inviteSnap.exists()) {
-            const newProfile: UserProfile = {
-              uid: user.uid,
-              displayName: user.displayName,
-              email: user.email,
-              currency: 'LKR',
-              role: isAdminEmail ? 'admin' : 'user',
-              isInvited: true,
-              createdAt: serverTimestamp()
-            };
-            await setDoc(userRef, newProfile);
-            if (inviteSnap.exists() && inviteSnap.data().status !== 'accepted') {
-              try {
-                await setDoc(inviteRef, { status: 'accepted' }, { merge: true });
-              } catch (e) {
-                console.error("Failed to update invitation status", e);
-              }
-            }
-            setProfile(newProfile);
-          } else {
-            console.warn("Access denied: Email not in invitation list.");
-            await logout();
-            alert("No invitation found for this email. Please contact the administrator.");
-            setProfile(null);
-            setUser(null);
-            setLoading(false);
-            return;
-          }
-        } else {
-          const existingProfile = userSnap.data() as UserProfile;
-          // Re-verify invitation status even if profile exists (for revocation support)
-          const isAdminEmail = user.email === "ravindijason@gmail.com";
-          const inviteRef = doc(db, 'invitations', user.email?.toLowerCase() || '');
-          const inviteSnap = await getDoc(inviteRef);
-
-          if (isAdminEmail || inviteSnap.exists()) {
-            setProfile(existingProfile);
-          } else {
-            console.warn("Access revoked: Invitation no longer valid.");
-            await logout();
-            alert("Your access has been revoked or your invitation is no longer valid.");
-            setProfile(null);
-            setUser(null);
-          }
-        }
-      } else {
-        setProfile(null);
-      }
-      setUser(user);
-      setLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  return (
-    <AuthContext.Provider value={{ user, profile, loading }}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
+type SheetState =
+  | { kind: 'quickAdd' }
+  | { kind: 'income'; existing?: TransactionView }
+  | { kind: 'expense'; existing?: TransactionView }
+  | { kind: 'category' }
+  | { kind: 'invite' }
+  | { kind: 'taxSetup' }
+  | null;
 
 export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <AuthContent />
+        <AuthGate />
       </AuthProvider>
     </ErrorBoundary>
   );
 }
 
-function AuthContent() {
-  const { user, profile, loading } = useAuth();
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#FDF7FF] dark:bg-[#0A0A0A]"><motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full" /></div>;
-  // Dashboard is ONLY accessible if BOTH user AND profile exist
-  return (user && profile) ? <Dashboard /> : <Login />;
+function AuthGate() {
+  const { user, profile, loading, accessError } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-brand-50 dark:bg-ink-950">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: 'linear' }}
+          className="size-10 rounded-full border-[3px] border-brand-600 border-t-transparent"
+        />
+      </div>
+    );
+  }
+
+  // Both must be present: a signed-in user without a profile was refused access.
+  return user && profile ? <AppShell /> : <Login accessError={accessError} />;
+}
+
+function AppShell() {
+  const { user, profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+
+  const data = useFinancialData(user?.uid);
+  const invitations = useInvitations(isAdmin);
+
+  const [view, setView] = useState<View>('dashboard');
+  const [sheet, setSheet] = useState<SheetState>(null);
+  const [yaStartYear, setYaStartYear] = useState(() =>
+    yaStartYearForDate(new Date()),
+  );
+  // Which month the spending breakdown is showing; starts on the current one.
+  const [spendMonth, setSpendMonth] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
+  const overview = useTaxOverview(
+    data.transactions,
+    data.taxProfile,
+    data.settledDeadlines,
+    yaStartYear,
+  );
+
+  // Held as plain numbers so they are stable dependencies across renders.
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+
+  const { transactions, categories } = data;
+
+  const allTime = useMemo(() => totals(transactions), [transactions]);
+  const thisMonth = useMemo(
+    () => totals(withinMonth(transactions, currentYear, currentMonth)),
+    [transactions, currentYear, currentMonth],
+  );
+  const yearTotals = useMemo(
+    () => totals(withinYa(transactions, yaStartYear)),
+    [transactions, yaStartYear],
+  );
+  const budgets = useMemo(
+    () => categoryBudgets(categories, transactions, currentYear, currentMonth),
+    [categories, transactions, currentYear, currentMonth],
+  );
+  const availableYears = useMemo(() => yearsWithActivity(transactions), [transactions]);
+
+  const closeSheet = () => setSheet(null);
+
+  const handleDelete = async (transaction: TransactionView) => {
+    if (transaction.kind === 'income') {
+      await deleteIncome(transaction.id);
+    } else {
+      await deleteExpense(transaction.id);
+    }
+  };
+
+  const handleEdit = (transaction: TransactionView) => {
+    setSheet({
+      kind: transaction.kind === 'income' ? 'income' : 'expense',
+      existing: transaction,
+    });
+  };
+
+  const handleSettle = (
+    year: number,
+    period: FilingPeriod,
+    amount: number,
+  ) => {
+    if (user) void markFilingSettled(user.uid, year, period, amount);
+  };
+
+  // Stepping never runs past the current month, since there is no data ahead.
+  const stepSpendMonth = (delta: number) => {
+    setSpendMonth((current) => {
+      const moved = new Date(current.year, current.month + delta, 1);
+      if (moved > new Date(currentYear, currentMonth, 1)) return current;
+      return { year: moved.getFullYear(), month: moved.getMonth() };
+    });
+  };
+
+  const canStepForward =
+    spendMonth.year !== currentYear || spendMonth.month !== currentMonth;
+
+  const taxNeedsAttention =
+    overview.overdue.length > 0 ||
+    (overview.nextAction != null && overview.nextAction.daysRemaining <= 14);
+
+  const monthName = monthLabel(today);
+
+  const HEADINGS: Record<View, string> = {
+    dashboard: 'Payground',
+    tax: 'Income tax',
+    spending: 'Spending',
+    admin: 'Admin',
+  };
+
+  return (
+    <div className="min-h-dvh bg-brand-50 pb-28 dark:bg-ink-950">
+      <header className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 pt-safe pb-4 sm:px-6">
+        <h1 className="truncate text-lg font-bold tracking-tight sm:text-xl">
+          {HEADINGS[view]}
+        </h1>
+        <div className="flex shrink-0 items-center gap-2">
+          {user?.photoURL && (
+            <img
+              src={user.photoURL}
+              alt=""
+              className="size-9 rounded-full ring-2 ring-white dark:ring-ink-800"
+            />
+          )}
+          <button
+            type="button"
+            onClick={() => void logout()}
+            aria-label="Sign out"
+            className="grid size-10 place-items-center rounded-full text-ink-900/45 transition-colors hover:bg-black/5 dark:text-white/45 dark:hover:bg-white/10"
+          >
+            <LogOut className="size-5" />
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-2xl px-4 sm:px-6">
+        {data.error && (
+          <p
+            role="alert"
+            className="mb-4 flex items-start gap-2.5 rounded-[var(--radius-tile)] bg-money-out/10 p-4 text-sm text-money-out-ink dark:text-money-out-ink-dark"
+          >
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            {data.error}
+          </p>
+        )}
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="space-y-5"
+          >
+            {view === 'dashboard' && (
+              <>
+                <BalanceCard
+                  allTime={allTime}
+                  thisMonth={thisMonth}
+                  monthName={monthName}
+                  onAddIncome={() => setSheet({ kind: 'income' })}
+                  onAddExpense={() => setSheet({ kind: 'expense' })}
+                />
+                <TaxSummaryCard
+                  overview={overview}
+                  onOpenDetail={() => setView('tax')}
+                />
+                <MonthlyFlowChart
+                  transactions={transactions}
+                  yaStartYear={yaStartYear}
+                />
+                <SavingsChart
+                  transactions={transactions}
+                  yaStartYear={yaStartYear}
+                />
+                <BudgetList
+                  budgets={budgets}
+                  monthName={monthName}
+                  onAddCategory={() => setSheet({ kind: 'category' })}
+                />
+                <TransactionList
+                  title="Recent activity"
+                  emptyMessage="Nothing logged yet. Add your first income or expense."
+                  transactions={transactions}
+                  limit={6}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+                <AiInsights yearTotals={yearTotals} tax={overview.current} />
+              </>
+            )}
+
+            {view === 'tax' && (
+              <TaxScreen
+                overview={overview}
+                availableYears={availableYears}
+                onChangeYear={setYaStartYear}
+                onSettle={handleSettle}
+                onUnsettle={(year, period) => {
+                  if (user) void unmarkFilingSettled(user.uid, year, period);
+                }}
+                onOpenSetup={() => setSheet({ kind: 'taxSetup' })}
+              />
+            )}
+
+            {view === 'spending' && (
+              <>
+                <SpendingBreakdown
+                  transactions={transactions}
+                  year={spendMonth.year}
+                  month={spendMonth.month}
+                  onStep={stepSpendMonth}
+                  canStepForward={canStepForward}
+                  monthName={monthLabel(
+                    new Date(spendMonth.year, spendMonth.month, 1),
+                  )}
+                />
+                <TransactionList
+                  title={`All activity · ${transactions.length}`}
+                  emptyMessage="Nothing logged yet. Add your first income or expense."
+                  transactions={transactions}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+              </>
+            )}
+
+            {view === 'admin' && isAdmin && (
+              <AdminPanel
+                invitations={invitations}
+                onInvite={() => setSheet({ kind: 'invite' })}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+
+      <BottomNav
+        view={view}
+        onChangeView={setView}
+        onQuickAdd={() => setSheet({ kind: 'quickAdd' })}
+        isAdmin={isAdmin}
+        taxNeedsAttention={taxNeedsAttention}
+      />
+
+      {/* Sheets */}
+      <Sheet
+        open={sheet?.kind === 'quickAdd'}
+        title="Add"
+        onClose={closeSheet}
+      >
+        <div className="space-y-2.5">
+          <QuickAddOption
+            label="Income"
+            hint="Money you received"
+            onClick={() => setSheet({ kind: 'income' })}
+            icon={<ArrowDownLeft className="size-5" />}
+            tone="in"
+          />
+          <QuickAddOption
+            label="Expense"
+            hint="Money you spent"
+            onClick={() => setSheet({ kind: 'expense' })}
+            icon={<ArrowUpRight className="size-5" />}
+            tone="out"
+          />
+          <QuickAddOption
+            label="Category"
+            hint="A new spending category or budget"
+            onClick={() => setSheet({ kind: 'category' })}
+            icon={<Target className="size-5" />}
+            tone="brand"
+          />
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={sheet?.kind === 'income'}
+        title={sheet?.kind === 'income' && sheet.existing ? 'Edit income' : 'Add income'}
+        onClose={closeSheet}
+      >
+        {user && sheet?.kind === 'income' && (
+          <IncomeForm
+            userId={user.uid}
+            existing={sheet.existing}
+            onDone={closeSheet}
+          />
+        )}
+      </Sheet>
+
+      <Sheet
+        open={sheet?.kind === 'expense'}
+        title={
+          sheet?.kind === 'expense' && sheet.existing ? 'Edit expense' : 'Add expense'
+        }
+        onClose={closeSheet}
+      >
+        {user && sheet?.kind === 'expense' && (
+          <ExpenseForm
+            userId={user.uid}
+            categories={categories}
+            existing={sheet.existing}
+            onDone={closeSheet}
+          />
+        )}
+      </Sheet>
+
+      <Sheet
+        open={sheet?.kind === 'category'}
+        title="New category"
+        description="Set a monthly budget and whether it counts as a business cost."
+        onClose={closeSheet}
+      >
+        {user && <CategoryForm userId={user.uid} onDone={closeSheet} />}
+      </Sheet>
+
+      <Sheet
+        open={sheet?.kind === 'taxSetup'}
+        title="Tax setup"
+        description="This decides which rates and rules the app applies."
+        onClose={closeSheet}
+      >
+        {user && (
+          <TaxSetupForm
+            userId={user.uid}
+            existing={data.taxProfile}
+            onDone={closeSheet}
+          />
+        )}
+      </Sheet>
+
+      <Sheet open={sheet?.kind === 'invite'} title="Invite a user" onClose={closeSheet}>
+        {user && <InviteForm adminUid={user.uid} onDone={closeSheet} />}
+      </Sheet>
+    </div>
+  );
+}
+
+const QUICK_ADD_TONES = {
+  in: 'bg-money-in/10 text-money-in-ink dark:text-money-in-ink-dark',
+  out: 'bg-money-out/10 text-money-out-ink dark:text-money-out-ink-dark',
+  brand: 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-200',
+} as const;
+
+function QuickAddOption({
+  label,
+  hint,
+  icon,
+  tone,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  icon: React.ReactNode;
+  tone: keyof typeof QUICK_ADD_TONES;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-4 rounded-[var(--radius-tile)] border border-black/8 p-4 text-left transition-colors hover:bg-black/[0.03] dark:border-white/10 dark:hover:bg-white/5"
+    >
+      <span
+        className={`grid size-11 shrink-0 place-items-center rounded-[0.875rem] ${QUICK_ADD_TONES[tone]}`}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-bold">{label}</span>
+        <span className="block text-xs text-ink-900/55 dark:text-white/50">{hint}</span>
+      </span>
+    </button>
+  );
 }
