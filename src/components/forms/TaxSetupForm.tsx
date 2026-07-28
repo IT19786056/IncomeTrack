@@ -1,18 +1,15 @@
 import { useState } from 'react';
-import {
-  AmountField,
-  FormError,
-  SelectField,
-  SubmitButton,
-  ToggleField,
-} from '../ui/Field';
+import { FormError, SelectField, SubmitButton, ToggleField } from '../ui/Field';
+import { SalaryScheduleFields } from './SalaryScheduleFields';
 import { saveTaxProfile } from '../../lib/repository';
 import type { TaxProfile } from '../../types';
-import type { TaxRegime } from '../../lib/tax';
+import { normalizeSchedule, type SalaryPeriod, type TaxRegime } from '../../lib/tax';
 
 interface Props {
   userId: string;
   existing: TaxProfile | null;
+  /** Year of assessment the salary preview is shown against. */
+  yaStartYear: number;
   onDone: () => void;
 }
 
@@ -31,12 +28,12 @@ const REGIME_NOTES: Record<TaxRegime, string> = {
     'Your employer should deduct APIT from each payslip, so there is usually nothing for you to pay directly.',
 };
 
-export function TaxSetupForm({ userId, existing, onDone }: Props) {
+export function TaxSetupForm({ userId, existing, yaStartYear, onDone }: Props) {
   const [regime, setRegime] = useState<TaxRegime>(existing?.regime ?? 'service-export');
   const [hasTin, setHasTin] = useState(existing?.hasTin ?? false);
   const [hasFiledBefore, setHasFiledBefore] = useState(existing?.hasFiledBefore ?? false);
-  const [expectedMonthly, setExpectedMonthly] = useState(
-    existing?.expectedMonthlyIncome ? String(existing.expectedMonthlyIncome) : '',
+  const [schedule, setSchedule] = useState<SalaryPeriod[]>(
+    existing?.salarySchedule ?? [],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +42,13 @@ export function TaxSetupForm({ userId, existing, onDone }: Props) {
     event.preventDefault();
     setError(null);
 
-    const parsedExpected = expectedMonthly.trim() === '' ? null : Number(expectedMonthly);
-    if (parsedExpected !== null && (!Number.isFinite(parsedExpected) || parsedExpected < 0)) {
-      setError('Enter a monthly amount of zero or more, or leave it blank.');
+    const cleaned = normalizeSchedule(schedule);
+    // A row with an amount but no month would silently never apply.
+    const incomplete = schedule.some(
+      (row) => row.monthlyAmount > 0 && !/^\d{4}-\d{2}$/.test(row.from),
+    );
+    if (incomplete) {
+      setError('Give every salary rate a month it starts from.');
       return;
     }
 
@@ -57,7 +58,7 @@ export function TaxSetupForm({ userId, existing, onDone }: Props) {
         regime,
         hasTin,
         hasFiledBefore,
-        expectedMonthlyIncome: parsedExpected,
+        salarySchedule: cleaned,
       });
       onDone();
     } catch {
@@ -68,8 +69,20 @@ export function TaxSetupForm({ userId, existing, onDone }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <FormError>{error}</FormError>
+
+      <SalaryScheduleFields
+        value={schedule}
+        onChange={setSchedule}
+        previewYaStartYear={yaStartYear}
+      />
+
+      <p className="rounded-[var(--radius-tile)] bg-black/[0.03] p-3.5 text-xs leading-relaxed text-ink-900/65 dark:bg-white/5 dark:text-white/60">
+        Sri Lanka's tax year runs <strong>1 April to 31 March</strong>, so a rate
+        starting in January counts towards the previous tax year for its first
+        three months.
+      </p>
 
       <SelectField
         label="How you earn"
@@ -95,13 +108,6 @@ export function TaxSetupForm({ userId, existing, onDone }: Props) {
         hint="Helps the app tell you which filings are genuinely outstanding."
         checked={hasFiledBefore}
         onChange={setHasFiledBefore}
-      />
-
-      <AmountField
-        label="Expected income per month"
-        value={expectedMonthly}
-        onChange={setExpectedMonthly}
-        hint="Used to estimate months you haven't logged yet, so a pay rise isn't averaged away. Leave blank to estimate from your logged months instead."
       />
 
       <SubmitButton loading={saving}>Save tax setup</SubmitButton>

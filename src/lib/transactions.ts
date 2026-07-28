@@ -49,6 +49,7 @@ export function normalizeExpenses(expenses: Expense[]): TransactionView[] {
         date,
         // Legacy records predate the field; absent means not claimed.
         deductible: expense.deductible === true,
+        isSalary: false,
       },
     ];
   });
@@ -67,6 +68,7 @@ export function normalizeIncome(income: Income[]): TransactionView[] {
         description: entry.description,
         date,
         deductible: false,
+        isSalary: entry.isSalary === true,
       },
     ];
   });
@@ -118,6 +120,34 @@ export function totals(transactions: TransactionView[]): Totals {
   }
 
   return { income, expenses, deductibleExpenses, net: income - expenses };
+}
+
+export interface OtherIncome {
+  total: number;
+  /** The individual entries, newest first, for showing what made up the total. */
+  entries: TransactionView[];
+}
+
+/**
+ * Income in a year of assessment that the salary schedule does not already
+ * cover — bonuses, one-off projects, interest.
+ *
+ * Entries flagged as salary are excluded on purpose: the schedule is the source
+ * of truth for salary, so counting a logged payslip as well would double it.
+ */
+export function otherIncomeForYa(
+  transactions: TransactionView[],
+  yaStartYear: number,
+): OtherIncome {
+  const entries = sortByDateDesc(
+    withinYa(transactions, yaStartYear).filter(
+      (t) => t.kind === 'income' && !t.isSalary,
+    ),
+  );
+  return {
+    total: entries.reduce((sum, t) => sum + t.amount, 0),
+    entries,
+  };
 }
 
 /** Years of assessment that actually contain data, newest first. */
@@ -175,98 +205,6 @@ export function monthlySeries(
     const { income, expenses } = totals(withinMonth(transactions, year, monthIndex));
     return { label, income, expenses };
   });
-}
-
-export type ProjectionBasis =
-  /** Unlogged months filled at a monthly figure the user stated. */
-  | 'expected'
-  /** Unlogged months filled at the average of the months that were logged. */
-  | 'average'
-  /** No projection: a closed year, or nothing to project from. */
-  | 'actual';
-
-export interface YearProjection {
-  /** Distinct months in this YA that contain income. */
-  monthsWithIncome: number;
-  /** What each of those months averaged. */
-  monthlyAverageIncome: number;
-  /** Multiplier applied to logged figures to reach the estimate. */
-  factor: number;
-  /** Estimated income for the whole year. */
-  income: number;
-  /** Estimated deductible expenses for the whole year. */
-  deductibleExpenses: number;
-  /** False when the figures are actuals — a closed year, or no data. */
-  isProjection: boolean;
-  basis: ProjectionBasis;
-  /** The monthly figure used to fill unlogged months, when basis is 'expected'. */
-  expectedMonthlyIncome: number | null;
-}
-
-/**
- * Extrapolates a part-year of records to a full-year estimate.
- *
- * Quarterly self-assessment instalments are a quarter of *estimated annual*
- * tax, not of tax accrued so far, so a projection is what the instalment must
- * be based on — computing from actuals alone understates every payment.
- *
- * Two bases, because averaging alone gets a pay rise wrong. Backfilling four
- * months as 140k/140k/140k/160k averages to 145k and projects a year below the
- * relief threshold, when the real year is higher. So when the user states an
- * expected monthly income, unlogged months are filled at that rate instead:
- * logged actuals stay exactly as recorded, and only the gap is estimated.
- *
- * Deductible expenses are scaled by the same factor as income, holding the
- * ratio between them steady rather than inventing a spending pattern.
- */
-export function projectYear(
-  transactions: TransactionView[],
-  yaStartYear: number,
-  now: Date = new Date(),
-  expectedMonthlyIncome?: number | null,
-): YearProjection {
-  const yearTransactions = withinYa(transactions, yaStartYear);
-  const { income: logged, deductibleExpenses: loggedDeductible } =
-    totals(yearTransactions);
-  const { end } = yaRange(yaStartYear);
-
-  const monthsSeen = new Set<string>();
-  for (const t of yearTransactions) {
-    if (t.kind === 'income' && t.amount > 0) {
-      monthsSeen.add(`${t.date.getFullYear()}-${t.date.getMonth()}`);
-    }
-  }
-  const monthsWithIncome = monthsSeen.size;
-  const monthlyAverageIncome = monthsWithIncome > 0 ? logged / monthsWithIncome : 0;
-
-  const yearOpen = now < end;
-  const monthsUnlogged = Math.max(0, 12 - monthsWithIncome);
-
-  let income = logged;
-  let basis: ProjectionBasis = 'actual';
-
-  if (yearOpen && monthsUnlogged > 0) {
-    if (expectedMonthlyIncome && expectedMonthlyIncome > 0) {
-      income = logged + expectedMonthlyIncome * monthsUnlogged;
-      basis = 'expected';
-    } else if (monthsWithIncome > 0) {
-      income = monthlyAverageIncome * 12;
-      basis = 'average';
-    }
-  }
-
-  const factor = logged > 0 ? income / logged : 1;
-
-  return {
-    monthsWithIncome,
-    monthlyAverageIncome,
-    factor,
-    income,
-    deductibleExpenses: loggedDeductible * factor,
-    isProjection: basis !== 'actual',
-    basis,
-    expectedMonthlyIncome: expectedMonthlyIncome ?? null,
-  };
 }
 
 export interface CategorySpend {
