@@ -5,6 +5,7 @@ import {
   FormError,
   SubmitButton,
   TextField,
+  ToggleField,
 } from '../ui/Field';
 import { fromDateInputValue, toDateInputValue } from '../../lib/format';
 import { addIncome, updateIncome } from '../../lib/repository';
@@ -24,6 +25,7 @@ export function IncomeForm({ userId, existing, onDone }: Props) {
     toDateInputValue(existing?.date ?? new Date()),
   );
   const [description, setDescription] = useState(existing?.description ?? '');
+  const [isSalary, setIsSalary] = useState(existing?.isSalary ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +51,7 @@ export function IncomeForm({ userId, existing, onDone }: Props) {
         source: source.trim(),
         date: parsedDate,
         description: description.trim(),
+        isSalary,
       };
       if (existing) {
         await updateIncome(existing.id, draft);
@@ -90,6 +93,13 @@ export function IncomeForm({ userId, existing, onDone }: Props) {
         max={toDateInputValue(new Date())}
         required
         hint="Which year of assessment this falls in depends on this date."
+      />
+
+      <ToggleField
+        label="This is my regular salary"
+        hint="Your salary is already counted from the rates in Tax setup, so ticking this keeps it out of the tax total. It still counts towards your cash position. Leave it off for bonuses and one-off work, which are taxed on top."
+        checked={isSalary}
+        onChange={setIsSalary}
       />
 
       <TextField

@@ -17,13 +17,15 @@ import { db } from '../firebase';
 import { OperationType } from '../types';
 import type { TaxProfile } from '../types';
 import { handleFirestoreError } from './firestoreUtils';
-import type { FilingPeriod, TaxRegime } from './tax';
+import { normalizeSchedule, type FilingPeriod, type SalaryPeriod, type TaxRegime } from './tax';
 
 export interface IncomeDraft {
   amount: number;
   source: string;
   date: Date;
   description?: string;
+  /** Already covered by the salary schedule, so excluded from the tax total. */
+  isSalary: boolean;
 }
 
 export interface ExpenseDraft {
@@ -41,6 +43,7 @@ export async function addIncome(userId: string, draft: IncomeDraft) {
       amount: draft.amount,
       source: draft.source,
       description: draft.description ?? '',
+      isSalary: draft.isSalary,
       date: Timestamp.fromDate(draft.date),
       createdAt: serverTimestamp(),
     });
@@ -55,6 +58,7 @@ export async function updateIncome(id: string, draft: IncomeDraft) {
       amount: draft.amount,
       source: draft.source,
       description: draft.description ?? '',
+      isSalary: draft.isSalary,
       date: Timestamp.fromDate(draft.date),
     });
   } catch (error) {
@@ -143,7 +147,7 @@ export async function saveTaxProfile(
     regime: TaxRegime;
     hasTin: boolean;
     hasFiledBefore: boolean;
-    expectedMonthlyIncome: number | null;
+    salarySchedule: SalaryPeriod[];
   },
 ) {
   const profile: TaxProfile = {
@@ -151,7 +155,7 @@ export async function saveTaxProfile(
     regime: settings.regime,
     hasTin: settings.hasTin,
     hasFiledBefore: settings.hasFiledBefore,
-    expectedMonthlyIncome: settings.expectedMonthlyIncome,
+    salarySchedule: normalizeSchedule(settings.salarySchedule),
     updatedAt: serverTimestamp() as unknown as null,
   };
   try {

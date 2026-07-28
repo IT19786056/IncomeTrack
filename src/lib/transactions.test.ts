@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { projectYear, savings, spendByCategory, spendSplit } from './transactions';
+import {
+  otherIncomeForYa,
+  savings,
+  spendByCategory,
+  spendSplit,
+} from './transactions';
 import type { TransactionView } from '../types';
 
 let nextId = 0;
@@ -10,11 +15,32 @@ function expense(
   label: string,
   deductible = false,
 ): TransactionView {
-  return { id: `e${nextId++}`, kind: 'expense', amount, label, date, deductible };
+  return {
+    id: `e${nextId++}`,
+    kind: 'expense',
+    amount,
+    label,
+    date,
+    deductible,
+    isSalary: false,
+  };
 }
 
-function income(date: Date, amount: number, label = 'Client'): TransactionView {
-  return { id: `i${nextId++}`, kind: 'income', amount, label, date, deductible: false };
+function income(
+  date: Date,
+  amount: number,
+  label = 'Client',
+  isSalary = false,
+): TransactionView {
+  return {
+    id: `i${nextId++}`,
+    kind: 'income',
+    amount,
+    label,
+    date,
+    deductible: false,
+    isSalary,
+  };
 }
 
 const JUL_2026 = { year: 2026, month: 6 };
@@ -83,175 +109,46 @@ describe('spendSplit', () => {
   });
 });
 
-describe('projectYear', () => {
-  const now = new Date(2026, 6, 28); // 28 July 2026, inside YA 2026/27
-
-  it('scales a single logged month up to a full year', () => {
-    // The exact case that showed zero tax: one 160,000 salary payment.
-    const result = projectYear([income(new Date(2026, 6, 5), 160_000)], 2026, now);
-
-    expect(result.monthsWithIncome).toBe(1);
-    expect(result.monthlyAverageIncome).toBe(160_000);
-    expect(result.income).toBe(1_920_000);
-    expect(result.isProjection).toBe(true);
-  });
-
-  it('averages over months containing income, not every elapsed month', () => {
-    // Two months logged out of four elapsed. Averaging over four would report
-    // 75,000/month and badly understate the year.
-    const result = projectYear(
+describe('otherIncomeForYa', () => {
+  it('excludes salary, which the schedule already covers', () => {
+    const result = otherIncomeForYa(
       [
-        income(new Date(2026, 5, 5), 140_000),
-        income(new Date(2026, 6, 5), 160_000),
+        income(new Date(2026, 6, 5), 160_000, 'Employer', true),
+        income(new Date(2026, 8, 12), 75_000, 'Side project'),
       ],
       2026,
-      now,
     );
 
-    expect(result.monthsWithIncome).toBe(2);
-    expect(result.monthlyAverageIncome).toBe(150_000);
-    expect(result.income).toBe(1_800_000);
+    expect(result.total).toBe(75_000);
+    expect(result.entries.map((e) => e.label)).toEqual(['Side project']);
   });
 
-  it('treats several payments in one month as a single month', () => {
-    const result = projectYear(
+  it('ignores expenses and other years of assessment', () => {
+    const result = otherIncomeForYa(
       [
-        income(new Date(2026, 6, 5), 100_000),
-        income(new Date(2026, 6, 20), 60_000),
+        income(new Date(2026, 8, 12), 75_000, 'Bonus'),
+        income(new Date(2026, 1, 12), 50_000, 'Old year'), // Feb 2026 → YA 2025/26
+        expense(new Date(2026, 8, 14), 20_000, 'Food'),
       ],
       2026,
-      now,
     );
 
-    expect(result.monthsWithIncome).toBe(1);
-    expect(result.income).toBe(1_920_000);
+    expect(result.total).toBe(75_000);
   });
 
-  it('scales deductible expenses by the same factor', () => {
-    const result = projectYear(
-      [
-        income(new Date(2026, 6, 5), 160_000),
-        expense(new Date(2026, 6, 9), 10_000, 'Software', true),
-        expense(new Date(2026, 6, 9), 30_000, 'Food'), // personal, not claimed
-      ],
+  it('treats income with no salary flag as extra income', () => {
+    // Legacy records predate the flag; counting them is the safe reading.
+    const result = otherIncomeForYa([income(new Date(2026, 6, 5), 40_000)], 2026);
+    expect(result.total).toBe(40_000);
+  });
+
+  it('is zero when nothing but salary was logged', () => {
+    const result = otherIncomeForYa(
+      [income(new Date(2026, 6, 5), 160_000, 'Employer', true)],
       2026,
-      now,
     );
-
-    expect(result.deductibleExpenses).toBe(120_000);
-  });
-
-  it('does not project a closed year', () => {
-    const result = projectYear(
-      [income(new Date(2026, 6, 5), 160_000)],
-      2026,
-      new Date(2027, 5, 1), // after 31 March 2027
-    );
-
-    expect(result.isProjection).toBe(false);
-    expect(result.factor).toBe(1);
-    expect(result.income).toBe(160_000);
-  });
-
-  it('does not project a full twelve months', () => {
-    const twelve = Array.from({ length: 12 }, (_, i) =>
-      income(new Date(2026, 3 + i, 5), 160_000),
-    );
-    const result = projectYear(twelve, 2026, new Date(2027, 2, 20));
-
-    expect(result.monthsWithIncome).toBe(12);
-    expect(result.isProjection).toBe(false);
-    expect(result.income).toBe(1_920_000);
-  });
-
-  it('projects nothing when there is no income yet', () => {
-    const result = projectYear(
-      [expense(new Date(2026, 6, 9), 5_000, 'Food')],
-      2026,
-      now,
-    );
-
-    expect(result.monthsWithIncome).toBe(0);
-    expect(result.isProjection).toBe(false);
-    expect(result.income).toBe(0);
-    expect(result.basis).toBe('actual');
-  });
-
-  it('falls back to averaging when no expected income is set', () => {
-    const result = projectYear([income(new Date(2026, 6, 5), 160_000)], 2026, now);
-    expect(result.basis).toBe('average');
-  });
-
-  describe('with an expected monthly income', () => {
-    it('fills only the unlogged months, keeping actuals intact', () => {
-      const result = projectYear(
-        [income(new Date(2026, 6, 5), 160_000)],
-        2026,
-        now,
-        160_000,
-      );
-
-      expect(result.basis).toBe('expected');
-      // 1 logged month at 160,000 plus 11 unlogged at 160,000.
-      expect(result.income).toBe(1_920_000);
-    });
-
-    it('gets a mid-year pay rise right, where averaging does not', () => {
-      const backfilled = [
-        income(new Date(2026, 3, 5), 140_000),
-        income(new Date(2026, 4, 5), 140_000),
-        income(new Date(2026, 5, 5), 140_000),
-        income(new Date(2026, 6, 5), 160_000),
-      ];
-
-      // Averaging sees 145,000/month and lands under the relief threshold.
-      expect(projectYear(backfilled, 2026, now).income).toBe(1_740_000);
-
-      // Stating the new rate keeps the four logged months and fills the other
-      // eight at 160,000: 580,000 + 1,280,000.
-      const stated = projectYear(backfilled, 2026, now, 160_000);
-      expect(stated.income).toBe(1_860_000);
-      expect(stated.basis).toBe('expected');
-    });
-
-    it('estimates a year before anything has been logged', () => {
-      const result = projectYear([], 2026, now, 160_000);
-      expect(result.income).toBe(1_920_000);
-      expect(result.basis).toBe('expected');
-    });
-
-    it('scales claimed expenses along with the filled income', () => {
-      const result = projectYear(
-        [
-          income(new Date(2026, 6, 5), 160_000),
-          expense(new Date(2026, 6, 9), 10_000, 'Software', true),
-        ],
-        2026,
-        now,
-        160_000,
-      );
-
-      // Income scaled 12x, so the claim scales 12x too.
-      expect(result.deductibleExpenses).toBe(120_000);
-    });
-
-    it('is ignored once the year has closed', () => {
-      const result = projectYear(
-        [income(new Date(2026, 6, 5), 160_000)],
-        2026,
-        new Date(2027, 5, 1),
-        160_000,
-      );
-
-      expect(result.basis).toBe('actual');
-      expect(result.income).toBe(160_000);
-    });
-
-    it('is ignored when set to zero or blank', () => {
-      const txns = [income(new Date(2026, 6, 5), 160_000)];
-      expect(projectYear(txns, 2026, now, 0).basis).toBe('average');
-      expect(projectYear(txns, 2026, now, null).basis).toBe('average');
-    });
+    expect(result.total).toBe(0);
+    expect(result.entries).toEqual([]);
   });
 });
 

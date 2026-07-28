@@ -7,6 +7,18 @@ export {
   yearLabel,
 } from './rates';
 
+export type { SalaryPeriod, SalaryMonth } from './salary';
+export {
+  monthKey,
+  parseMonthKey,
+  normalizeSchedule,
+  rateForMonth,
+  salaryMonthsForYa,
+  salaryForYa,
+  salaryForCalendarYear,
+  isScheduleEmpty,
+} from './salary';
+
 export type { FilingPeriod, Deadline } from './periods';
 export {
   yaStartYearForDate,

@@ -7,11 +7,17 @@ import {
   daysUntil,
   deadlineKey,
   deadlinesForYa,
+  isScheduleEmpty,
   relevantDeadlines,
+  salaryForCalendarYear,
+  salaryForYa,
+  salaryMonthsForYa,
   yaStartYearForDate,
+  type SalaryMonth,
+  type SalaryPeriod,
+  type TaxRegime,
 } from '../lib/tax';
-import type { TaxRegime } from '../lib/tax';
-import { projectYear, totals, withinYa, type YearProjection } from '../lib/transactions';
+import { otherIncomeForYa, totals, withinYa } from '../lib/transactions';
 
 /**
  * Assumed until the user confirms their setup. Chosen because it is the
@@ -30,35 +36,55 @@ export interface DeadlineStatus {
   nothingToPay: boolean;
 }
 
+export interface IncomeBreakdown {
+  /** Salary for the year, from the schedule. */
+  salary: number;
+  /** Everything else logged and not flagged as salary. */
+  other: number;
+  /** The entries making up `other`, newest first. */
+  otherEntries: TransactionView[];
+  /** salary + other. */
+  gross: number;
+  /** Per-month salary across April to March, for showing where the rate changes. */
+  salaryMonths: SalaryMonth[];
+  /** The same salary summed January to December, purely to explain the gap. */
+  calendarYearSalary: number;
+  /** True when no salary rate has been entered yet. */
+  scheduleEmpty: boolean;
+}
+
 export interface TaxOverview {
   yaStartYear: number;
   regime: TaxRegime;
   /** True while the user has not confirmed their tax setup. */
   needsSetup: boolean;
-  /** Tax on the records as they stand — what would be owed if the year ended now. */
-  current: TaxComputation;
-  /** Tax on the estimated full year. Equals `current` once the year is closed. */
-  projected: TaxComputation;
-  /** How the full-year estimate was arrived at. */
-  projection: YearProjection;
+  /** True when a salary rate still needs entering for figures to mean anything. */
+  needsSalary: boolean;
+  computation: TaxComputation;
+  income: IncomeBreakdown;
+  /** Extra deductible expenses that would bring the bill to zero. Zero if already nil. */
+  claimsToReachZero: number;
   /** The next thing actually requiring money or a filing, if any. */
   nextAction: DeadlineStatus | null;
   /** Passed deadlines that carried a liability and are unsettled. */
   overdue: DeadlineStatus[];
   upcoming: DeadlineStatus[];
-  /**
-   * All five deadlines for the selected year, settled ones included, so they
-   * stay listed and can be un-marked.
-   */
+  /** All five deadlines for the selected year, settled ones included. */
   yearDeadlines: DeadlineStatus[];
 }
 
 /**
- * Derives the whole tax picture from transactions.
+ * Derives the whole tax picture.
  *
- * Nothing here is stored — editing or back-dating a transaction immediately
- * changes every figure, so a saved number can never drift from the records
- * behind it.
+ * Salary comes from the schedule the user states, so a full year is known from
+ * the first day rather than guessed from however many months happen to be
+ * logged. Everything else — bonuses, one-off work — is counted from the
+ * transactions actually recorded, and added on top. Deductible expenses are
+ * counted as claimed, never extrapolated, which errs towards overstating the
+ * bill rather than promising a deduction that has not happened.
+ *
+ * Nothing is stored: editing a transaction or the schedule changes every figure
+ * immediately, so a saved number can never drift from the records behind it.
  */
 export function useTaxOverview(
   transactions: TransactionView[],
@@ -68,59 +94,48 @@ export function useTaxOverview(
   now: Date = new Date(),
 ): TaxOverview {
   const regime = taxProfile?.regime ?? DEFAULT_REGIME;
+  const schedule: SalaryPeriod[] = taxProfile?.salarySchedule ?? [];
 
   return useMemo(() => {
-    /** Tax on what has actually been logged for a year of assessment. */
-    const actualFor = (year: number): TaxComputation => {
-      const { income, deductibleExpenses } = totals(withinYa(transactions, year));
-      return computeTax({
-        yaStartYear: year,
-        regime,
-        grossIncome: income,
-        deductibleExpenses,
-      });
-    };
+    const computeFor = (year: number) => {
+      const salary = salaryForYa(schedule, year);
+      const other = otherIncomeForYa(transactions, year);
+      const { deductibleExpenses } = totals(withinYa(transactions, year));
 
-    /** Tax on the estimated full year, which is what instalments are based on. */
-    const projectedFor = (year: number) => {
-      const estimate = projectYear(
-        transactions,
-        year,
-        now,
-        taxProfile?.expectedMonthlyIncome,
-      );
       return {
-        estimate,
+        salary,
+        other,
+        deductibleExpenses,
         computation: computeTax({
           yaStartYear: year,
           regime,
-          grossIncome: estimate.income,
-          deductibleExpenses: estimate.deductibleExpenses,
+          grossIncome: salary + other.total,
+          deductibleExpenses,
         }),
       };
     };
 
-    const current = actualFor(yaStartYear);
-    const { estimate: projection, computation: projected } = projectedFor(yaStartYear);
+    const selected = computeFor(yaStartYear);
+    const { computation } = selected;
 
     // Cache per year: several deadlines share a year of assessment.
     const byYear = new Map<number, TaxComputation>();
     const cachedComputation = (year: number) => {
-      if (year === yaStartYear) return projected;
+      if (year === yaStartYear) return computation;
       const existing = byYear.get(year);
       if (existing) return existing;
-      const computed = projectedFor(year).computation;
+      const computed = computeFor(year).computation;
       byYear.set(year, computed);
       return computed;
     };
 
     const describe = (deadline: Deadline): DeadlineStatus => {
-      // Instalments are a quarter of the estimated year, not of tax so far.
-      const computation = cachedComputation(deadline.yaStartYear);
+      // Instalments are a quarter of the year's estimated tax.
+      const yearTax = cachedComputation(deadline.yaStartYear);
       const amountDue =
         deadline.period === 'RETURN'
-          ? computation.totalTax
-          : computation.quarterlyInstalment;
+          ? yearTax.totalTax
+          : yearTax.quarterlyInstalment;
 
       return {
         deadline,
@@ -134,7 +149,6 @@ export function useTaxOverview(
 
     // Alerting deliberately ignores settled deadlines; the year listing does not.
     const { overdue, upcoming } = relevantDeadlines(now, settledDeadlines);
-
     const describedOverdue = overdue.map(describe).filter((d) => !d.nothingToPay);
     const describedUpcoming = upcoming.map(describe);
 
@@ -146,9 +160,20 @@ export function useTaxOverview(
       yaStartYear,
       regime,
       needsSetup: taxProfile === null,
-      current,
-      projected,
-      projection,
+      needsSalary: isScheduleEmpty(schedule),
+      computation,
+      income: {
+        salary: selected.salary,
+        other: selected.other.total,
+        otherEntries: selected.other.entries,
+        gross: selected.salary + selected.other.total,
+        salaryMonths: salaryMonthsForYa(schedule, yaStartYear),
+        calendarYearSalary: salaryForCalendarYear(schedule, yaStartYear),
+        scheduleEmpty: isScheduleEmpty(schedule),
+      },
+      // Taxable income is what sits above the relief, so claiming that much
+      // more in business costs cancels the bill exactly.
+      claimsToReachZero: computation.taxableIncome,
       nextAction,
       overdue: describedOverdue,
       upcoming: describedUpcoming,
@@ -157,5 +182,5 @@ export function useTaxOverview(
     // `now` is intentionally excluded: it changes identity every render, and
     // day-level output does not need to react to it within a session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, regime, taxProfile, settledDeadlines, yaStartYear]);
+  }, [transactions, regime, schedule, taxProfile, settledDeadlines, yaStartYear]);
 }

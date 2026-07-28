@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { Check, Info, RotateCcw, Settings2, TriangleAlert } from 'lucide-react';
 import type { DeadlineStatus, TaxOverview } from '../hooks/useTaxOverview';
-import { money, moneyPrecise, percent, relativeDays, shortDate } from '../lib/format';
+import { compactDate, money, moneyPrecise, percent, relativeDays, shortDate } from '../lib/format';
 import { deductionSaving, yearLabel, type FilingPeriod } from '../lib/tax';
 
 interface Props {
@@ -44,7 +43,7 @@ function Row({
       <p
         className={`tabular shrink-0 font-mono ${
           emphasis ? 'text-base font-bold' : 'text-sm'
-        } ${negative ? 'text-money-out' : ''}`}
+        } ${negative ? 'text-money-out-ink dark:text-money-out-ink-dark' : ''}`}
       >
         {negative && '−'}
         {value}
@@ -82,7 +81,11 @@ function DeadlineRow({
         </p>
         <p
           className={`tabular mt-1 text-xs font-semibold ${
-            overdue ? 'text-money-out' : settled ? 'text-money-in' : 'text-ink-900/60 dark:text-white/55'
+            overdue
+              ? 'text-money-out-ink dark:text-money-out-ink-dark'
+              : settled
+                ? 'text-money-in-ink dark:text-money-in-ink-dark'
+                : 'text-ink-900/60 dark:text-white/55'
           }`}
         >
           {settled
@@ -125,19 +128,36 @@ export function TaxScreen({
   onUnsettle,
   onOpenSetup,
 }: Props) {
-  const { current, projected, projection, regime, yearDeadlines, needsSetup } =
+  const { computation, income, regime, yearDeadlines, needsSetup, needsSalary } =
     overview;
+  const saving = deductionSaving(computation);
 
-  // Part-way through a year there are two honest answers — what has actually
-  // been logged, and what the year is heading for. Show both rather than
-  // picking one silently.
-  const [basis, setBasis] = useState<'projected' | 'actual'>('projected');
-  const shown = projection.isProjection && basis === 'projected' ? projected : current;
-  const saving = deductionSaving(shown);
+  // The month the rate changes, so the split can be shown rather than asserted.
+  const rateChanges = income.salaryMonths.filter(
+    (month, index) =>
+      index > 0 && month.amount !== income.salaryMonths[index - 1].amount,
+  );
 
   return (
     <div className="space-y-5">
-      {needsSetup && (
+      {needsSalary && (
+        <button
+          type="button"
+          onClick={onOpenSetup}
+          className="flex w-full items-center gap-3 rounded-[var(--radius-tile)] border border-warn/30 bg-warn/10 p-4 text-left"
+        >
+          <TriangleAlert className="size-5 shrink-0 text-warn" />
+          <span className="min-w-0 flex-1 text-sm">
+            <span className="font-semibold">Add your salary.</span>{' '}
+            <span className="text-ink-900/65 dark:text-white/60">
+              Set what you earn a month and from when — everything here depends on it.
+            </span>
+          </span>
+          <Settings2 className="size-4 shrink-0 text-warn" />
+        </button>
+      )}
+
+      {needsSetup && !needsSalary && (
         <button
           type="button"
           onClick={onOpenSetup}
@@ -162,7 +182,7 @@ export function TaxScreen({
             type="button"
             onClick={() => onChangeYear(year)}
             className={`tabular shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-              year === current.yaStartYear
+              year === computation.yaStartYear
                 ? 'bg-ink-900 text-white dark:bg-white dark:text-ink-900'
                 : 'bg-black/5 text-ink-900/65 hover:bg-black/10 dark:bg-white/10 dark:text-white/65'
             }`}
@@ -172,26 +192,31 @@ export function TaxScreen({
         ))}
       </div>
 
-      {current.ratesEstimated && (
+      {computation.ratesEstimated && (
         <p className="flex items-start gap-2 rounded-[var(--radius-tile)] bg-warn/10 p-3 text-xs text-warn">
           <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          Rates for YA {current.yaLabel} have not been published yet. These figures
-          carry forward the most recent published rates.
+          Rates for YA {computation.yaLabel} have not been published yet. These
+          figures carry forward the most recent published rates.
         </p>
       )}
 
-      {current.exempt && (
-        <p className="flex items-start gap-2 rounded-[var(--radius-tile)] bg-money-in/10 p-3 text-xs text-money-in">
+      {computation.exempt && (
+        <p className="flex items-start gap-2 rounded-[var(--radius-tile)] bg-money-in/10 p-3 text-xs text-money-in-ink dark:text-money-in-ink-dark">
           <Info className="mt-0.5 size-4 shrink-0" />
-          Foreign-currency service income was exempt in YA {current.yaLabel}. The
-          exemption ended on 1 April 2025.
+          Foreign-currency service income was exempt in YA {computation.yaLabel}.
+          The exemption ended on 1 April 2025.
         </p>
       )}
 
-      {/* The computation */}
+      {/* Where the income comes from */}
       <section className="rounded-[var(--radius-card)] bg-white p-5 sm:p-6 dark:bg-ink-900">
-        <div className="mb-2 flex items-start justify-between gap-3">
-          <h2 className="text-base font-bold tracking-tight">How this is worked out</h2>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-bold tracking-tight">Your income</h2>
+            <p className="mt-0.5 text-xs text-ink-900/55 dark:text-white/50">
+              April {computation.yaStartYear} to March {computation.yaStartYear + 1}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onOpenSetup}
@@ -201,97 +226,89 @@ export function TaxScreen({
             <Settings2 className="size-4" />
           </button>
         </div>
-        <p className="mb-3 text-xs text-ink-900/55 dark:text-white/50">
+
+        <Row
+          label="Salary"
+          value={money(income.salary)}
+          note={
+            rateChanges.length > 0
+              ? `Rate changed in ${rateChanges.map((m) => m.label).join(', ')}`
+              : 'From the rates in your tax setup'
+          }
+        />
+        <Row
+          label="Other income"
+          value={money(income.other)}
+          note={
+            income.otherEntries.length > 0
+              ? `${income.otherEntries.length} entr${income.otherEntries.length === 1 ? 'y' : 'ies'} logged`
+              : 'Bonuses and one-off work you log'
+          }
+        />
+        <Row label="Total income" value={money(income.gross)} emphasis />
+
+        {income.otherEntries.length > 0 && (
+          <ul className="mt-3 space-y-1.5 rounded-[var(--radius-tile)] bg-black/[0.03] p-3 dark:bg-white/5">
+            {income.otherEntries.map((entry) => (
+              <li
+                key={entry.id}
+                className="tabular flex items-baseline justify-between gap-3 text-xs"
+              >
+                <span className="min-w-0 truncate text-ink-900/60 dark:text-white/55">
+                  {entry.label} · {compactDate(entry.date)}
+                </span>
+                <span className="shrink-0 font-semibold">{money(entry.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {income.calendarYearSalary > 0 &&
+          income.calendarYearSalary !== income.salary && (
+            <p className="mt-3 rounded-[var(--radius-tile)] bg-black/[0.03] p-3 text-xs leading-relaxed text-ink-900/60 dark:bg-white/5 dark:text-white/55">
+              The same salary over January to December{' '}
+              {computation.yaStartYear} would be{' '}
+              <span className="tabular font-semibold">
+                LKR {money(income.calendarYearSalary)}
+              </span>
+              . Tax uses the April-to-March year, which is why the two differ.
+            </p>
+          )}
+      </section>
+
+      {/* The computation */}
+      <section className="rounded-[var(--radius-card)] bg-white p-5 sm:p-6 dark:bg-ink-900">
+        <h2 className="text-base font-bold tracking-tight">How this is worked out</h2>
+        <p className="mt-0.5 mb-3 text-xs text-ink-900/55 dark:text-white/50">
           {REGIME_LABELS[regime]}
         </p>
 
-        {projection.isProjection && (
-          <>
-            <div
-              role="group"
-              aria-label="Basis for these figures"
-              className="mb-3 grid grid-cols-2 gap-1 rounded-full bg-black/[0.05] p-1 dark:bg-white/10"
-            >
-              {(
-                [
-                  ['projected', 'Estimated year'],
-                  ['actual', 'Logged so far'],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setBasis(value)}
-                  aria-pressed={basis === value}
-                  className={`rounded-full py-2 text-xs font-bold transition-colors ${
-                    basis === value
-                      ? 'bg-white shadow-sm dark:bg-ink-800'
-                      : 'text-ink-900/55 dark:text-white/55'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {basis === 'projected' && (
-              <div className="mb-3 rounded-[var(--radius-tile)] bg-brand-50 p-3 text-xs leading-relaxed text-brand-900 dark:bg-brand-900/20 dark:text-brand-100">
-                {projection.basis === 'expected' ? (
-                  <p>
-                    Your {projection.monthsWithIncome}{' '}
-                    {projection.monthsWithIncome === 1 ? 'logged month' : 'logged months'}{' '}
-                    counted as recorded, with the remaining{' '}
-                    {12 - projection.monthsWithIncome} filled at the LKR{' '}
-                    {money(projection.expectedMonthlyIncome ?? 0)} a month you
-                    expect.
-                  </p>
-                ) : (
-                  <p>
-                    Scaled to a full year from the {projection.monthsWithIncome}{' '}
-                    {projection.monthsWithIncome === 1 ? 'month' : 'months'} you have
-                    logged, averaging LKR {money(projection.monthlyAverageIncome)} a
-                    month.{' '}
-                    <button
-                      type="button"
-                      onClick={onOpenSetup}
-                      className="font-semibold underline underline-offset-2"
-                    >
-                      Set an expected monthly income
-                    </button>{' '}
-                    if your rate has changed — averaging cannot see a pay rise.
-                  </p>
-                )}
-                <p className="mt-1.5 opacity-80">
-                  Quarterly instalments are based on this, because
-                  self-assessment charges a quarter of the estimated year.
-                </p>
-              </div>
-            )}
-          </>
-        )}
-
-        <Row label="Income received" value={money(shown.grossIncome)} />
+        <Row label="Total income" value={money(computation.grossIncome)} />
         <Row
           label="Deductible expenses"
-          value={money(shown.deductibleExpenses)}
-          note="Expenses you flagged as business costs"
-          negative={shown.deductibleExpenses > 0}
+          value={money(computation.deductibleExpenses)}
+          note="Expenses you flagged as business costs, as logged"
+          negative={computation.deductibleExpenses > 0}
         />
-        <Row label="Net business income" value={money(shown.netBusinessIncome)} emphasis />
+        <Row
+          label="Net business income"
+          value={money(computation.netBusinessIncome)}
+          emphasis
+        />
         <Row
           label="Personal relief"
-          value={money(shown.reliefApplied)}
-          note={`Up to LKR ${money(shown.personalRelief)} per year`}
-          negative={shown.reliefApplied > 0}
+          value={money(computation.reliefApplied)}
+          note={`Up to LKR ${money(computation.personalRelief)} per year`}
+          negative={computation.reliefApplied > 0}
         />
-        <Row label="Taxable income" value={money(shown.taxableIncome)} emphasis />
+        <Row label="Taxable income" value={money(computation.taxableIncome)} emphasis />
 
-        {shown.bands.length > 0 && (
+        {computation.bands.length > 0 && (
           <div className="mt-4 space-y-2 rounded-[var(--radius-tile)] bg-black/[0.03] p-4 dark:bg-white/5">
             <p className="text-[11px] font-bold tracking-wider text-ink-900/50 uppercase dark:text-white/45">
               Bands applied
             </p>
-            {shown.bands.map((band, index) => (
+            {computation.bands.map((band, index) => (
               <div
                 key={index}
                 className="tabular flex items-baseline justify-between gap-3 font-mono text-xs"
@@ -307,45 +324,46 @@ export function TaxScreen({
 
         <div className="mt-4 flex items-baseline justify-between gap-4 border-t-2 border-ink-900/10 pt-4 dark:border-white/15">
           <div>
-            <p className="text-sm font-bold">
-              {projection.isProjection && basis === 'projected'
-                ? 'Estimated tax for the year'
-                : 'Tax on what you have logged'}
-            </p>
+            <p className="text-sm font-bold">Tax for the year</p>
             <p className="tabular mt-0.5 text-xs text-ink-900/50 dark:text-white/45">
-              {percent(shown.effectiveRate)} effective · LKR{' '}
-              {money(shown.monthlyEquivalent)}/month
+              {percent(computation.effectiveRate)} effective · LKR{' '}
+              {money(computation.monthlyEquivalent)}/month
             </p>
           </div>
           <p className="tabular shrink-0 font-mono text-xl font-bold">
-            {money(shown.totalTax)}
+            {money(computation.totalTax)}
           </p>
         </div>
 
         {saving > 0 && (
-          <p className="tabular mt-3 flex items-center gap-2 text-xs text-money-in">
+          <p className="tabular mt-3 flex items-center gap-2 text-xs text-money-in-ink dark:text-money-in-ink-dark">
             <Check className="size-4 shrink-0" />
             Your claimed expenses saved LKR {money(saving)} this year.
           </p>
         )}
 
-        {shown.nextThreshold && (
+        {overview.claimsToReachZero > 0 && (
           <p className="tabular mt-3 text-xs text-ink-900/55 dark:text-white/50">
-            {shown.nextThreshold.taxableAt === 0
-              ? `Tax begins at LKR ${money(shown.nextThreshold.grossAt)} of income for the year — another LKR ${money(shown.nextThreshold.remaining)} to go.`
-              : `The ${percent(shown.nextThreshold.rate)} band starts at LKR ${money(shown.nextThreshold.grossAt)} — another LKR ${money(shown.nextThreshold.remaining)} to go.`}
+            Claiming another LKR {money(overview.claimsToReachZero)} in business
+            expenses this year would bring this to zero.
+          </p>
+        )}
+
+        {computation.nextThreshold && computation.taxableIncome > 0 && (
+          <p className="tabular mt-2 text-xs text-ink-900/55 dark:text-white/50">
+            The {percent(computation.nextThreshold.rate)} band starts at LKR{' '}
+            {money(computation.nextThreshold.grossAt)} — another LKR{' '}
+            {money(computation.nextThreshold.remaining)} to go.
           </p>
         )}
       </section>
 
       {/* Deadlines */}
       <section className="rounded-[var(--radius-card)] bg-white p-5 sm:p-6 dark:bg-ink-900">
-        <h2 className="text-base font-bold tracking-tight">
-          Payments and filings
-        </h2>
+        <h2 className="text-base font-bold tracking-tight">Payments and filings</h2>
         <p className="mt-1 mb-4 text-xs text-ink-900/55 dark:text-white/50">
-          Quarterly instalments are due 15 August, 15 November, 15 February and 15
-          May. The annual return follows on 30 November.
+          Each instalment is a quarter of the year's tax. Due 15 August,
+          15 November, 15 February and 15 May, with the return on 30 November.
         </p>
         <div className="space-y-2.5">
           {yearDeadlines.map((status) => (
@@ -368,9 +386,10 @@ export function TaxScreen({
       </section>
 
       <p className="px-2 pb-2 text-xs leading-relaxed text-ink-900/45 dark:text-white/40">
-        These figures are computed from the records you have entered, using
-        published IRD rates. They are an estimate to plan with, not tax advice —
-        confirm anything material with a qualified adviser before you file.
+        These figures are computed from the salary you entered and the records
+        you have logged, using published IRD rates. They are an estimate to plan
+        with, not tax advice — confirm anything material with a qualified adviser
+        before you file.
       </p>
     </div>
   );

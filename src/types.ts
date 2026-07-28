@@ -1,5 +1,5 @@
 import type { Timestamp } from 'firebase/firestore';
-import type { FilingPeriod, TaxRegime } from './lib/tax';
+import type { FilingPeriod, SalaryPeriod, TaxRegime } from './lib/tax';
 
 /**
  * Firestore hands back a Timestamp on read, but a document written with
@@ -51,6 +51,12 @@ export interface Income {
   /** When the money was received — set by the user, not the clock. */
   date: FirestoreDate;
   description?: string;
+  /**
+   * True when this entry is the salary already covered by the salary schedule.
+   * Such entries still count towards the cash position but are left out of the
+   * tax computation, so salary is never counted twice.
+   */
+  isSalary?: boolean;
   createdAt: FirestoreDate;
 }
 
@@ -75,11 +81,12 @@ export interface TaxProfile {
   /** Whether they have ever filed a return. */
   hasFiledBefore: boolean;
   /**
-   * What they expect to receive in a normal month. Used to fill months not yet
-   * logged, so a mid-year pay rise isn't averaged away. Null means fall back to
-   * the average of the months on record.
+   * Salary stated as monthly rates with effective-from months. This is the
+   * source of truth for salary in the tax computation; salary logged as income
+   * transactions is for cash tracking only and is excluded, to avoid counting
+   * it twice.
    */
-  expectedMonthlyIncome?: number | null;
+  salarySchedule?: SalaryPeriod[];
   updatedAt: FirestoreDate;
 }
 
@@ -109,6 +116,8 @@ export interface TransactionView {
   description?: string;
   date: Date;
   deductible: boolean;
+  /** Income only: already covered by the salary schedule, so excluded from tax. */
+  isSalary: boolean;
 }
 
 export enum OperationType {

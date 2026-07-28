@@ -263,7 +263,7 @@ function AppShell() {
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                 />
-                <AiInsights yearTotals={yearTotals} tax={overview.current} />
+                <AiInsights yearTotals={yearTotals} tax={overview.computation} />
               </>
             )}
 
@@ -401,6 +401,7 @@ function AppShell() {
           <TaxSetupForm
             userId={user.uid}
             existing={data.taxProfile}
+            yaStartYear={yaStartYear}
             onDone={closeSheet}
           />
         )}
